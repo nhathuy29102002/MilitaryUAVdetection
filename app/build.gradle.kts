@@ -5,16 +5,20 @@ plugins {
 
 android {
     namespace = "com.example.militaryuavdetection"
-    compileSdk = 36
+    compileSdk = 34
 
     defaultConfig {
         applicationId = "com.example.militaryuavdetection"
-        minSdk = 34
+
+        minSdk = 26
+
         targetSdk = 36
+
         versionCode = 1
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
     }
 
     buildTypes {
@@ -26,12 +30,17 @@ android {
             )
         }
     }
+
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
     }
     kotlinOptions {
-        jvmTarget = "11"
+        jvmTarget = "1.8"
+    }
+
+    aaptOptions {
+        noCompress("onnx")
     }
 }
 
@@ -43,4 +52,18 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
+
+    // 1. CameraX (Thay thế mss, cv2.VideoCapture)
+    val cameraxVersion = "1.3.3"
+    implementation("androidx.camera:camera-core:$cameraxVersion")
+    implementation("androidx.camera:camera-camera2:$cameraxVersion")
+    implementation("androidx.camera:camera-lifecycle:$cameraxVersion")
+    implementation("androidx.camera:camera-view:$cameraxVersion")
+
+    // 2. ONNX Runtime (Thay thế ultralytics.YOLO)
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.18.0")
+
+    // 3. Kotlin Coroutines (Thay thế QRunnable, QThreadPool)
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.1")
 }
