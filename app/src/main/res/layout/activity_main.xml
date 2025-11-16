@@ -23,7 +23,7 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
 
-        <com.example.militaryuavdetection.BoundingBoxOverlay
+        <com.militaryuavdetection.ui.view.BoundingBoxOverlay
             android:id="@+id/bbox_overlay"
             android:layout_width="match_parent"
             android:layout_height="match_parent" />

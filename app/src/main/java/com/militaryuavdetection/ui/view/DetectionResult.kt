@@ -1,4 +1,4 @@
-package com.militaryuavdetection.objectdetector
+package com.example.militaryuavdetection
 
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
@@ -14,10 +14,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.*
 import androidx.core.content.ContextCompat
 import androidx.core.content.PermissionChecker
-import com.militaryuavdetection.data.DetectionResult
-import com.militaryuavdetection.databinding.ActivityCameraBinding
-import com.militaryuavdetection.viewmodel.MainViewModel
-import com.militaryuavdetection.ui.camera.YuvToRgbConverter
+import com.example.militaryuavdetection.databinding.ActivityCameraBinding
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -75,6 +72,7 @@ class CameraActivity : AppCompatActivity() {
 
     private fun observeViewModel() {
         if (captureMode == "REALTIME") {
+            // (SỬA LỖI) Nhận cả results và labels
             viewModel.realtimeResults.observe(this) { (results, labels) ->
                 binding.cameraBboxOverlay.setResults(results, viewModel.markType.value ?: 3, labels)
             }
@@ -173,6 +171,7 @@ class CameraActivity : AppCompatActivity() {
             override fun onImageSaved(output: ImageCapture.OutputFileResults) {
                 val msg = "Đã chụp ảnh: ${photoFile.name}"
                 runOnUiThread { Toast.makeText(baseContext, msg, Toast.LENGTH_SHORT).show() }
+                // TODO: Gửi photoFile.path về MainActivity/ViewModel
                 finish()
             }
         })
@@ -201,6 +200,7 @@ class CameraActivity : AppCompatActivity() {
                         if (!recordEvent.hasError()) {
                             val msg = "Đã quay video: ${videoFile.name}"
                             runOnUiThread { Toast.makeText(baseContext, msg, Toast.LENGTH_SHORT).show() }
+                            // TODO: Gửi videoFile.path về MainActivity/ViewModel
                         } else {
                             recording?.close()
                             recording = null

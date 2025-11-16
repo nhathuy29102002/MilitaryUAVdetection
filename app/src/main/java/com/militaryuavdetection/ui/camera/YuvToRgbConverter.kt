@@ -1,5 +1,6 @@
-package com.example.militaryuavdetection
+package com.militaryuavdetection.ui.camera
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.ImageFormat

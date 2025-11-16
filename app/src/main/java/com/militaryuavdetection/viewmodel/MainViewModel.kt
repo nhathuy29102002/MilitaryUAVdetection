@@ -1,4 +1,4 @@
-package com.example.militaryuavdetection
+package com.militaryuavdetection.viewmodel
 
 import android.app.Application
 import android.content.Context
@@ -10,11 +10,12 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
+import com.militaryuavdetection.data.DetectionResult
+import com.militaryuavdetection.objectdetector.ObjectDetector // (SỬA LỖI) Import từ package con
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.io.File
 
-// ... (Data class FileItem giữ nguyên) ...
 data class FileItem(
     val id: String,
     val name: String,
@@ -28,41 +29,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val prefs = application.getSharedPreferences("UAV_DETECTOR_PREFS", Context.MODE_PRIVATE)
 
-    // --- Trạng thái Model ---
     private val _isModelLoaded = MutableLiveData(false)
     val isModelLoaded: LiveData<Boolean> = _isModelLoaded
 
-    // (THAY ĐỔI) Khởi tạo ObjectDetector
     private var objectDetector: ObjectDetector? = null
 
-    // --- Trạng thái MarkType ---
-    private val _markType = MutableLiveData(3) // 0: None, 1: Box, 2: Box+Class, 3: Box+Class+Conf
+    private val _markType = MutableLiveData(3)
     val markType: LiveData<Int> = _markType
 
-    // --- Trạng thái Danh sách File ---
     private val _fileList = MutableLiveData<List<FileItem>>(emptyList())
     val fileList: LiveData<List<FileItem>> = _fileList
 
-    // --- Trạng thái File/Video đang chọn ---
     private val _selectedFile = MutableLiveData<FileItem?>(null)
     val selectedFile: LiveData<FileItem?> = _selectedFile
 
-    // --- Trạng thái Kết quả Realtime ---
-    private val _realtimeResults = MutableLiveData<List<DetectionResult>>()
-    val realtimeResults: LiveData<List<DetectionResult>> = _realtimeResults
+    // (SỬA LỖI) Gửi cả Results và Labels
+    private val _realtimeResults = MutableLiveData<Pair<List<DetectionResult>, List<String>>>()
+    val realtimeResults: LiveData<Pair<List<DetectionResult>, List<String>>> = _realtimeResults
 
-    // (THAY ĐỔI) Tự động khởi tạo model khi ViewModel được tạo
     init {
         initializeModel()
     }
 
-    // (MỚI) Khởi tạo model từ assets
     private fun initializeModel() {
         if (_isModelLoaded.value == true) return
-
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                // (THAY ĐỔI Ở ĐÂY) Thay "yolov8n.onnx" bằng tên file .onnx của bạn
+                // (SỬA LỖI) Thay "yolov8n.onnx" bằng tên file .onnx của bạn
                 val modelName = "yolov8n.onnx"
 
                 objectDetector = ObjectDetector(getApplication(), modelName)
@@ -76,50 +69,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // (THAY ĐỔI) Xóa hàm loadModel(uri) và loadSavedModelPath()
-
     fun cycleMarkType() {
-        val currentType = _markType.value ?: 0
-        _markType.value = (currentType + 1) % 4
+        _markType.value = (_markType.value!! + 1) % 4
     }
 
-    // (MỚI) Xử lý khi 1 file được chọn
     fun onFileSelected(fileItem: FileItem) {
         _selectedFile.value = fileItem
-        // TODO: Nếu là ảnh, chạy detect 1 lần
-        // if (!fileItem.isVideo) {
-        //     viewModelScope.launch(Dispatchers.IO) {
-        //         val bitmap = ... (Lấy bitmap từ fileItem.uri)
-        //         val results = objectDetector?.detect(bitmap)
-        //         _realtimeResults.postValue(results) // Dùng chung LiveData
-        //     }
-        // }
+        // TODO: Xử lý chạy detect trên ảnh tĩnh
     }
 
-    // (MỚI) Xử lý detect realtime
     fun detectInRealtime(bitmap: Bitmap) {
         if (_isModelLoaded.value != true) return
-
         viewModelScope.launch(Dispatchers.IO) {
             val results = objectDetector?.detect(bitmap)
             results?.let {
-                _realtimeResults.postValue(it)
+                // (SỬA LỖI) Gửi cả results và labels
+                _realtimeResults.postValue(Pair(it, ObjectDetector.LABELS))
             }
         }
     }
 
-
     fun loadDirectory(treeUri: Uri) {
-        // ... (Hàm này giữ nguyên như cũ) ...
         viewModelScope.launch(Dispatchers.IO) {
             val context = getApplication<Application>().applicationContext
             val fileItems = mutableListOf<FileItem>()
-
-            // Sử dụng DocumentTree để duyệt thư mục (cách chuẩn)
-            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
-                treeUri,
-                DocumentsContract.getTreeDocumentId(treeUri)
-            )
+            val treeDocId = DocumentsContract.getTreeDocumentId(treeUri)
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, treeDocId)
 
             context.contentResolver.query(
                 childrenUri,
@@ -138,19 +113,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val mimeType = cursor.getString(2)
                     val date = cursor.getLong(3)
                     val size = cursor.getLong(4)
-
                     val fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
 
                     if ((mimeType.startsWith("image/") || mimeType.startsWith("video/")) && !name.startsWith(".")) {
                         fileItems.add(
-                            FileItem(
-                                id = docId,
-                                name = name,
-                                uri = fileUri,
-                                isVideo = mimeType.startsWith("video/"),
-                                date = date,
-                                size = size
-                            )
+                            FileItem(id = docId, name = name, uri = fileUri, isVideo = mimeType.startsWith("video/"), date = date, size = size)
                         )
                     }
                 }

@@ -1,4 +1,4 @@
-package com.example.militaryuavdetection
+package com.militaryuavdetection.ui.view
 
 import android.content.Context
 import android.graphics.Canvas
@@ -7,18 +7,13 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.View
-
-data class DetectionResult(
-    val boundingBox: RectF, // Tọa độ (0.0f - 1.0f)
-    val label: String,
-    val confidence: Float
-)
+import com.militaryuavdetection.data.DetectionResult
 
 class BoundingBoxOverlay(context: Context, attrs: AttributeSet?) : View(context, attrs) {
 
     private var results: List<DetectionResult> = emptyList()
+    private var labels: List<String> = emptyList()
 
-    // 0: None, 1: Box, 2: Box+Class, 3: Box+Class+Conf
     private var markType: Int = 3
 
     private val boxPaint = Paint().apply {
@@ -38,21 +33,19 @@ class BoundingBoxOverlay(context: Context, attrs: AttributeSet?) : View(context,
         style = Paint.Style.FILL
     }
 
-    // Hàm này được gọi từ MainActivity/ViewModel
-    fun setResults(detections: List<DetectionResult>, type: Int) {
+    fun setResults(detections: List<DetectionResult>, type: Int, labels: List<String>) {
         this.results = detections
         this.markType = type
-        // Yêu cầu View vẽ lại
+        this.labels = labels
         invalidate()
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
-        if (markType == 0) return // Không vẽ gì cả
+        if (markType == 0) return
 
         for (result in results) {
-            // Chuyển đổi tọa độ tương đối (0.0-1.0) sang tọa độ tuyệt đối của View
             val left = result.boundingBox.left * width
             val top = result.boundingBox.top * height
             val right = result.boundingBox.right * width
@@ -60,19 +53,17 @@ class BoundingBoxOverlay(context: Context, attrs: AttributeSet?) : View(context,
 
             val screenRect = RectF(left, top, right, bottom)
 
-            // 1. Vẽ Bounding Box
             canvas.drawRect(screenRect, boxPaint)
 
-            if (markType > 1) { // 2: Box+Class, 3: Box+Class+Conf
-                val label = if (markType == 2) {
+            if (markType > 1) {
+                val labelText = if (markType == 2) {
                     result.label
                 } else {
                     "${result.label} ${"%.2f".format(result.confidence)}"
                 }
 
-                // 2. Vẽ nền cho text
                 val textBounds = android.graphics.Rect()
-                textPaint.getTextBounds(label, 0, label.length, textBounds)
+                textPaint.getTextBounds(labelText, 0, labelText.length, textBounds)
                 val textBgRect = RectF(
                     screenRect.left,
                     screenRect.top - textBounds.height() - 10,
@@ -81,9 +72,8 @@ class BoundingBoxOverlay(context: Context, attrs: AttributeSet?) : View(context,
                 )
                 canvas.drawRect(textBgRect, textBackgroundPaint)
 
-                // 3. Vẽ Text
                 canvas.drawText(
-                    label,
+                    labelText,
                     screenRect.left + 5,
                     screenRect.top - 5,
                     textPaint

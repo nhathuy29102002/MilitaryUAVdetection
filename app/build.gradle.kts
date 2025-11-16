@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.militaryuavdetection"
+    namespace = "com.militaryuavdetection"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.example.militaryuavdetection"
+        applicationId = "com.militaryuavdetection"
 
         minSdk = 26
 
@@ -72,4 +72,5 @@ dependencies {
     // 3. Kotlin Coroutines (Thay thế QRunnable, QThreadPool)
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.1")
+    implementation("androidx.fragment:fragment-ktx:1.7.0")
 }
