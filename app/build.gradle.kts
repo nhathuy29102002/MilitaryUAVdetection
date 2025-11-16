@@ -31,6 +31,10 @@ android {
         }
     }
 
+    buildFeatures {
+        viewBinding = true
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
@@ -53,6 +57,7 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
 
+
     // 1. CameraX (Thay thế mss, cv2.VideoCapture)
     val cameraxVersion = "1.3.3"
     implementation("androidx.camera:camera-core:$cameraxVersion")
@@ -62,6 +67,7 @@ dependencies {
 
     // 2. ONNX Runtime (Thay thế ultralytics.YOLO)
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.18.0")
+    implementation("com.github.bumptech.glide:glide:4.16.0")
 
     // 3. Kotlin Coroutines (Thay thế QRunnable, QThreadPool)
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")

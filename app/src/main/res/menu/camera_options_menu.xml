@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/option_take_photo"
+        android:title="Chụp ảnh" />
+    <item
+        android:id="@+id/option_record_video"
+        android:title="Quay Video" />
+    <item
+        android:id="@+id/option_realtime"
+        android:title="Xử lý Realtime" />
+</menu>
