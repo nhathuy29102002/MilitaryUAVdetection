@@ -11,19 +11,10 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
 import com.militaryuavdetection.data.DetectionResult
-import com.militaryuavdetection.objectdetector.ObjectDetector // (SỬA LỖI) Import từ package con
+import com.militaryuavdetection.data.FileItem
+import com.militaryuavdetection.objectdetector.ObjectDetector
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import java.io.File
-
-data class FileItem(
-    val id: String,
-    val name: String,
-    val uri: Uri,
-    val isVideo: Boolean,
-    val date: Long,
-    val size: Long
-)
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -43,7 +34,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _selectedFile = MutableLiveData<FileItem?>(null)
     val selectedFile: LiveData<FileItem?> = _selectedFile
 
-    // (SỬA LỖI) Gửi cả Results và Labels
     private val _realtimeResults = MutableLiveData<Pair<List<DetectionResult>, List<String>>>()
     val realtimeResults: LiveData<Pair<List<DetectionResult>, List<String>>> = _realtimeResults
 
@@ -55,16 +45,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_isModelLoaded.value == true) return
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                // (SỬA LỖI) Thay "yolov8n.onnx" bằng tên file .onnx của bạn
                 val modelName = "yolov8n.onnx"
 
                 objectDetector = ObjectDetector(getApplication(), modelName)
                 objectDetector?.initialize()
                 _isModelLoaded.postValue(true)
-                Log.d("ViewModel", "Model $modelName đã được khởi tạo.")
+                Log.d("ViewModel", "Model $modelName initialized.")
             } catch (e: Exception) {
                 _isModelLoaded.postValue(false)
-                Log.e("ViewModel", "Khởi tạo model thất bại", e)
+                Log.e("ViewModel", "Model initialization failed", e)
             }
         }
     }
@@ -75,7 +64,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onFileSelected(fileItem: FileItem) {
         _selectedFile.value = fileItem
-        // TODO: Xử lý chạy detect trên ảnh tĩnh
     }
 
     fun detectInRealtime(bitmap: Bitmap) {
@@ -83,7 +71,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             val results = objectDetector?.detect(bitmap)
             results?.let {
-                // (SỬA LỖI) Gửi cả results và labels
                 _realtimeResults.postValue(Pair(it, ObjectDetector.LABELS))
             }
         }

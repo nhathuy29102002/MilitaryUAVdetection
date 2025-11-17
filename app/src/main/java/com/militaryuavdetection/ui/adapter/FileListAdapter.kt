@@ -1,17 +1,15 @@
-package com.example.militaryuavdetection
+package com.militaryuavdetection.ui.adapter
 
 import android.view.LayoutInflater
 import android.view.ViewGroup
-import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
-// Import thư viện binding của bạn
-import com.example.militaryuavdetection.databinding.ListItemIconBinding
-import com.example.militaryuavdetection.databinding.ListItemContentBinding
-import com.example.militaryuavdetection.databinding.ListItemDetailBinding
-// Import thư viện để tải ảnh (Glide hoặc Coil)
-// import com.bumptech.glide.Glide
+import com.militaryuavdetection.R
+import com.militaryuavdetection.data.FileItem
+import com.militaryuavdetection.databinding.ListItemIconBinding
+import com.militaryuavdetection.databinding.ListItemContentBinding
+import com.militaryuavdetection.databinding.ListItemDetailBinding
 
 class FileListAdapter(
     private val onClick: (FileItem) -> Unit
@@ -53,7 +51,6 @@ class FileListAdapter(
         }
     }
 
-    // --- SỬA LỖI: IconViewHolder ---
     class IconViewHolder(private val binding: ListItemIconBinding, val onClick: (FileItem) -> Unit) :
         RecyclerView.ViewHolder(binding.root) {
         private var currentItem: FileItem? = null
@@ -64,16 +61,11 @@ class FileListAdapter(
 
         fun bind(item: FileItem) {
             currentItem = item
-            // TODO: Dùng Glide/Coil để tải ảnh
-            // Glide.with(itemView.context).load(item.uri).into(binding.itemImage)
-
-            // Placeholder:
-            val iconRes = if (item.isVideo) R.drawable.video_icon else R.drawable.image_icon
+            val iconRes = if (item.isVideo) R.drawable.video_icon else R.drawable.ic_launcher_background
             binding.itemImage.setImageResource(iconRes)
         }
     }
 
-    // --- SỬA LỖI: DetailViewHolder ---
     class DetailViewHolder(private val binding: ListItemDetailBinding, val onClick: (FileItem) -> Unit) :
         RecyclerView.ViewHolder(binding.root) {
         private var currentItem: FileItem? = null
@@ -87,8 +79,7 @@ class FileListAdapter(
             binding.itemName.text = item.name
             binding.itemDate.text = android.text.format.DateFormat.format("dd/MM/yy", item.date)
 
-            // Sửa logic icon
-            val iconRes = if (item.isVideo) R.drawable.video_icon else R.drawable.image_icon
+            val iconRes = if (item.isVideo) R.drawable.video_icon else R.drawable.ic_launcher_background
             binding.itemIcon.setImageResource(iconRes)
         }
     }
@@ -105,11 +96,7 @@ class FileListAdapter(
             currentItem = item
             binding.itemName.text = item.name
             binding.itemDetails.text = "Ngày: ${android.text.format.DateFormat.format("dd/MM/yy", item.date)} - Kích thước: ${item.size / 1024} KB"
-            // TODO: Dùng Glide/Coil để tải ảnh
-            // Glide.with(itemView.context).load(item.uri).into(binding.itemImage)
-
-            // Placeholder:
-            val iconRes = if (item.isVideo) R.drawable.video_icon else R.drawable.image_icon
+            val iconRes = if (item.isVideo) R.drawable.video_icon else R.drawable.ic_launcher_background
             binding.itemImage.setImageResource(iconRes)
         }
     }
