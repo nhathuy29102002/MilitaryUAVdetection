@@ -27,4 +27,5 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.MilitaryUAVdetection" />
 
+
 </manifest>

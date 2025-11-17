@@ -48,8 +48,8 @@ class ObjectDetector(
                 val modelFile = copyAssetToCache(assetFileName)
                 val sessionOptions = OrtSession.SessionOptions()
                 try {
-                    sessionOptions.addNnapi(OrtSession.SessionOptions.NNAPIFlags.USE_FP16)
-                    Log.i("ObjectDetector", "NNAPI (FP16) enabled.")
+                    sessionOptions.addNnapi()
+                    Log.i("ObjectDetector", "NNAPI enabled.")
                 } catch (e: Exception) {
                     Log.w("ObjectDetector", "Could not enable NNAPI: ${e.message}")
                 }

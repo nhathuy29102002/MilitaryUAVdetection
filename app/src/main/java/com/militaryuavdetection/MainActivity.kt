@@ -16,8 +16,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.militaryuavdetection.databinding.ActivityMainBinding
 import com.bumptech.glide.Glide
+import com.militaryuavdetection.databinding.ActivityMainBinding
 import com.militaryuavdetection.objectdetector.CameraActivity
 import com.militaryuavdetection.ui.adapter.FileListAdapter
 import com.militaryuavdetection.viewmodel.MainViewModel
@@ -153,17 +153,17 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Model được tự động tải từ assets", Toast.LENGTH_SHORT).show()
         }
 
-        binding.viewModeBar.btnViewIcon.setOnClickListener {
+        binding.btnViewIcon.setOnClickListener {
             fileListAdapter.setViewType(FileListAdapter.VIEW_TYPE_ICON)
             binding.recyclerViewFiles.layoutManager = GridLayoutManager(this, 4)
         }
 
-        binding.viewModeBar.btnViewDetail.setOnClickListener {
+        binding.btnViewDetail.setOnClickListener {
             fileListAdapter.setViewType(FileListAdapter.VIEW_TYPE_DETAIL)
             binding.recyclerViewFiles.layoutManager = LinearLayoutManager(this)
         }
 
-        binding.viewModeBar.btnViewContent.setOnClickListener {
+        binding.btnViewContent.setOnClickListener {
             fileListAdapter.setViewType(FileListAdapter.VIEW_TYPE_CONTENT)
             binding.recyclerViewFiles.layoutManager = LinearLayoutManager(this)
         }
@@ -196,8 +196,7 @@ class MainActivity : AppCompatActivity() {
                     .load(fileItem.uri)
                     .into(binding.zoomableImageView)
 
-                binding.detailBarContainer.findViewById<android.widget.TextView>(R.id.text_detail_bar)
-                    .text = "Tên: ${fileItem.name} - Kích thước: ${fileItem.size / 1024} KB"
+                binding.textDetailBar.text = "Tên: ${fileItem.name} - Kích thước: ${fileItem.size / 1024} KB"
             } else {
                 binding.imagePanelPlaceholder.visibility = View.VISIBLE
                 binding.zoomableImageView.setImageResource(0)

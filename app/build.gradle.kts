@@ -69,6 +69,7 @@ dependencies {
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.18.0")
     implementation("com.github.bumptech.glide:glide:4.16.0")
 
+
     // 3. Kotlin Coroutines (Thay thế QRunnable, QThreadPool)
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.1")
