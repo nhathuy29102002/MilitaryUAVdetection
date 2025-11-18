@@ -1,0 +1,9 @@
+Truck 2
+Tank 4
+IFV 3
+SPG 6
+MRLS 7
+SAM 5
+Aircraft 8
+Civilian 0
+MRAP 1

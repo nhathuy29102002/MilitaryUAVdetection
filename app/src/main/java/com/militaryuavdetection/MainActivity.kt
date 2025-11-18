@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
 import android.text.Editable
@@ -28,6 +29,7 @@ import com.militaryuavdetection.database.ImageRecord
 import com.militaryuavdetection.databinding.ActivityMainBinding
 import com.militaryuavdetection.ui.adapter.FileListAdapter
 import com.militaryuavdetection.ui.adapter.GridSpacingItemDecoration
+import com.militaryuavdetection.ui.view.ZoomableImageView
 import com.militaryuavdetection.utils.ObjectDetector
 import com.militaryuavdetection.viewmodel.ImageViewModel
 import com.militaryuavdetection.viewmodel.ImageViewModelFactory
@@ -35,11 +37,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.BufferedReader
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.InputStreamReader
 
-enum class MarkingMode { OFF, MARK, BOX, NAME, CONFIDENCE }
+enum class MarkingMode { OFF, MARK, BOX, NAME, CONF, SMART }
 
 class MainActivity : AppCompatActivity() {
 
@@ -53,6 +57,19 @@ class MainActivity : AppCompatActivity() {
     private var itemDecoration: GridSpacingItemDecoration? = null
     private lateinit var objectDetector: ObjectDetector
     private val gson = Gson()
+    private val instanceValues = mutableMapOf<String, Int>()
+    private val colorMap = mapOf(
+        0 to Color.parseColor("#cfcfcf"),
+        1 to Color.parseColor("#7cffff"),
+        2 to Color.parseColor("#beff7f"),
+        3 to Color.parseColor("#feff7f"),
+        4 to Color.parseColor("#ffdf80"),
+        5 to Color.parseColor("#ffbf7f"),
+        6 to Color.parseColor("#ffbf7f"),
+        7 to Color.parseColor("#ed3c4d"),
+        8 to Color.parseColor("#fe7ef7")
+    )
+
 
     private val imageViewModel: ImageViewModel by viewModels {
         ImageViewModelFactory((application as MilitaryUavApplication).database.imageRecordDao())
@@ -60,12 +77,11 @@ class MainActivity : AppCompatActivity() {
 
     private val openFilesLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            val uris = result.data?.clipData?.let {
-                clipData -> (0 until clipData.itemCount).map { clipData.getItemAt(it).uri }
+            val uris = result.data?.clipData?.let { clipData ->
+                (0 until clipData.itemCount).map { clipData.getItemAt(it).uri }
             } ?: result.data?.data?.let { listOf(it) } ?: emptyList()
 
             if (uris.isNotEmpty()) {
-                // Permissions are now granted via the picker
                 insertUrisAndAnalyze(uris)
             }
         }
@@ -83,19 +99,32 @@ class MainActivity : AppCompatActivity() {
         setupClickListeners()
         observeViewModel()
         loadInitialData()
+        loadInstanceValues()
     }
 
-    private fun loadInitialData(){
-        lifecycleScope.launch{
-            // Clear previous session's data
+    private fun loadInstanceValues() {
+        try {
+            assets.open("models/instance_values.txt").use { inputStream ->
+                BufferedReader(InputStreamReader(inputStream)).forEachLine { line ->
+                    val parts = line.split(" ")
+                    if (parts.size == 2) {
+                        instanceValues[parts[0]] = parts[1].toInt()
+                    }
+                }
+            }
+        } catch (e: IOException) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun loadInitialData() {
+        lifecycleScope.launch {
             imageViewModel.clearAll()
-            // Load the selected model
             currentModel = sharedPreferences.getString("selected_model", null)
             currentModel?.let {
                 objectDetector.loadModel(it)
                 binding.browseModelButton.setImageResource(R.drawable.importmodel_check)
             }
-            // Load sample images
             loadSampleImages()
         }
     }
@@ -110,7 +139,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun selectRecord(record: ImageRecord){
+    private fun selectRecord(record: ImageRecord) {
         currentRecord = record
         fileListAdapter.updateSelection(record)
         try {
@@ -122,10 +151,9 @@ class MainActivity : AppCompatActivity() {
             val detections: List<ObjectDetector.DetectionResult> = record.boundingBoxes?.let {
                 gson.fromJson(it, type)
             } ?: emptyList()
-            binding.imagePanel.setDetections(detections)
+            binding.imagePanel.setDetections(detections, markingMode, instanceValues, colorMap)
 
         } catch (e: Exception) {
-            // SecurityException or other errors
             Toast.makeText(this, "Could not load image: ${record.name}", Toast.LENGTH_SHORT).show()
             e.printStackTrace()
         }
@@ -136,7 +164,6 @@ class MainActivity : AppCompatActivity() {
             imageViewModel.allRecords.collect { records ->
                 fileListAdapter.updateData(records)
                 binding.clearAllButton.isVisible = records.isNotEmpty()
-                // If the currently selected record was deleted, clear the panel
                 if (currentRecord != null && records.none { it.id == currentRecord!!.id }) {
                     clearSelection()
                 }
@@ -198,7 +225,7 @@ class MainActivity : AppCompatActivity() {
     private fun cycleMarkingMode() {
         markingMode = MarkingMode.values()[(markingMode.ordinal + 1) % MarkingMode.values().size]
         binding.markTypeButton.text = markingMode.name
-        binding.imagePanel.invalidate() // Redraws the view
+        currentRecord?.let { selectRecord(it) }
     }
 
     private fun toggleListPanelExtension() {
@@ -260,11 +287,11 @@ class MainActivity : AppCompatActivity() {
     private fun showSearch() { /* ... */ }
     private fun hideSearch() { /* ... */ }
 
-    private fun clearSelection(){
+    private fun clearSelection() {
         currentRecord = null
         fileListAdapter.updateSelection(null)
         binding.imagePanel.setImageDrawable(null)
-        binding.imagePanel.setDetections(emptyList())
+        binding.imagePanel.setDetections(emptyList(), markingMode, instanceValues, colorMap)
         binding.imageName.text = "Image Name"
         binding.imageSize.text = "Size"
     }
@@ -274,7 +301,6 @@ class MainActivity : AppCompatActivity() {
             var reprocessed = false
             val recordsToInsert = uris.mapNotNull { uri ->
                 try {
-                    // Check for duplicates
                     val existingRecord = imageViewModel.getRecordByUri(uri.toString())
                     if (existingRecord != null) {
                         imageViewModel.delete(existingRecord)
@@ -312,7 +338,6 @@ class MainActivity : AppCompatActivity() {
                 if (reprocessed) {
                     Toast.makeText(this@MainActivity, "Frame updated for existing image(s)", Toast.LENGTH_SHORT).show()
                 }
-                // Automatically select the last imported image
                 imageViewModel.getLastInsertedId()?.let { lastId ->
                     imageViewModel.getRecordById(lastId)?.let { selectRecord(it) }
                 }
@@ -338,10 +363,10 @@ class MainActivity : AppCompatActivity() {
                     null
                 }
             }
-            if(tempFileUris.isNotEmpty()){
-                 withContext(Dispatchers.Main){
-                     insertUrisAndAnalyze(tempFileUris)
-                 }
+            if (tempFileUris.isNotEmpty()) {
+                withContext(Dispatchers.Main) {
+                    insertUrisAndAnalyze(tempFileUris)
+                }
             }
 
         } catch (e: IOException) {
