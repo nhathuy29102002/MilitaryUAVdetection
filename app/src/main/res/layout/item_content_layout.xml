@@ -26,13 +26,29 @@
             android:text="File Name"
             android:textSize="16sp"
             android:textStyle="bold"
+            android:textColor="@android:color/white"
+            android:ellipsize="end"
+            android:maxLines="1"/>
+
+        <TextView
+            android:id="@+id/item_date"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Date"
             android:textColor="@android:color/white"/>
 
         <TextView
-            android:id="@+id/item_details"
+            android:id="@+id/item_file_size"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Date and Size"
+            android:text="File Size"
+            android:textColor="@android:color/white"/>
+
+        <TextView
+            android:id="@+id/item_image_size"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Image Size"
             android:textColor="@android:color/white"/>
     </LinearLayout>
 </LinearLayout>

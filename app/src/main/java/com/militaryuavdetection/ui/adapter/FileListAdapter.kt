@@ -91,14 +91,12 @@ class FileListAdapter(private var records: List<ImageRecord>, private var allRec
     inner class DetailViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         private val iconView: ImageView = itemView.findViewById(R.id.item_icon)
         private val nameView: TextView = itemView.findViewById(R.id.item_name)
-        private val dateView: TextView = itemView.findViewById(R.id.item_date)
         private val sizeView: TextView = itemView.findViewById(R.id.item_size)
 
         fun bind(record: ImageRecord) {
             val icon = if (record.mediaType == "VIDEO") R.drawable.video_icon else R.drawable.image_icon
             iconView.setImageResource(icon)
             nameView.text = record.name
-            dateView.text = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(record.dateModified))
             sizeView.text = "${record.width}x${record.height}"
         }
     }
@@ -106,7 +104,9 @@ class FileListAdapter(private var records: List<ImageRecord>, private var allRec
     inner class ContentViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         private val imageView: ImageView = itemView.findViewById(R.id.item_image)
         private val nameView: TextView = itemView.findViewById(R.id.item_name)
-        private val detailsView: TextView = itemView.findViewById(R.id.item_details)
+        private val dateView: TextView = itemView.findViewById(R.id.item_date)
+        private val fileSizeView: TextView = itemView.findViewById(R.id.item_file_size)
+        private val imageSizeView: TextView = itemView.findViewById(R.id.item_image_size)
 
         fun bind(record: ImageRecord) {
             try {
@@ -115,8 +115,14 @@ class FileListAdapter(private var records: List<ImageRecord>, private var allRec
                 imageView.setImageResource(R.drawable.ic_launcher_background) // Example placeholder
             }
             nameView.text = record.name
-            val date = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(record.dateModified))
-            detailsView.text = "$date - ${record.width}x${record.height}"
+            val date = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(record.dateModified))
+            dateView.text = date
+
+            // Assuming record.fileSize is in bytes
+            val fileSizeInMB = record.size / (1024.0 * 1024.0)
+            fileSizeView.text = String.format("%.2fMB", fileSizeInMB)
+
+            imageSizeView.text = "${record.width}x${record.height}"
         }
     }
 }

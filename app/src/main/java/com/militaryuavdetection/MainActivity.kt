@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.View
+import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.Toast
@@ -28,6 +29,7 @@ import com.militaryuavdetection.viewmodel.ImageViewModel
 import com.militaryuavdetection.viewmodel.ImageViewModelFactory
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import java.io.IOException
 
 class MainActivity : AppCompatActivity() {
 
@@ -36,6 +38,7 @@ class MainActivity : AppCompatActivity() {
     private var currentModel: String? = null
     private var isListPanelExtended = false
     private lateinit var sharedPreferences: SharedPreferences
+    private var currentRecord: ImageRecord? = null
 
     private val imageViewModel: ImageViewModel by viewModels {
         ImageViewModelFactory((application as MilitaryUavApplication).database.imageRecordDao())
@@ -60,20 +63,6 @@ class MainActivity : AppCompatActivity() {
                         imageViewModel.getRecordById(lastId)?.let { selectRecord(it) }
                     }
                 }
-            }
-        }
-    }
-
-    private val openModelLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            result.data?.data?.let { uri ->
-                contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
-                currentModel = uri.toString()
-                sharedPreferences.edit().putString("selected_model", currentModel).apply()
-                binding.browseModelButton.setImageResource(R.drawable.importmodel_check)
             }
         }
     }
@@ -105,6 +94,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun selectRecord(record: ImageRecord){
+        currentRecord = record
         try {
             binding.imagePanel.setImageURI(record.uri.toUri())
             binding.imageName.text = record.name
@@ -134,7 +124,13 @@ class MainActivity : AppCompatActivity() {
         binding.viewModeContent.setOnClickListener { setViewMode(FileListAdapter.ViewMode.CONTENT) }
 
         binding.extendListPanelButton.setOnClickListener { toggleListPanelExtension() }
-        binding.searchIcon.setOnClickListener { showSearch() }
+        binding.searchIcon.setOnClickListener {
+            if (binding.searchEditText.visibility == View.VISIBLE) {
+                hideSearch()
+            } else {
+                showSearch()
+            }
+        }
 
         binding.searchEditText.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -145,6 +141,15 @@ class MainActivity : AppCompatActivity() {
 
             override fun afterTextChanged(s: Editable?) {}
         })
+
+        binding.searchEditText.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_SEARCH || actionId == EditorInfo.IME_ACTION_DONE) {
+                hideSearch()
+                true
+            } else {
+                false
+            }
+        }
     }
 
     private fun toggleListPanelExtension() {
@@ -186,11 +191,28 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openModelPicker() {
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = "*/*" // Should be application/octet-stream for .onnx, but * a safer bet
+        try {
+            val models = assets.list("models")?.filter { it.endsWith(".onnx") }?.toTypedArray()
+            if (models.isNullOrEmpty()) {
+                Toast.makeText(this, "No models found in assets.", Toast.LENGTH_SHORT).show()
+                return
+            }
+
+            AlertDialog.Builder(this)
+                .setTitle("Select a model")
+                .setItems(models) { _, which ->
+                    val selectedModelName = models[which]
+                    val modelPath = "models/$selectedModelName"
+                    currentModel = modelPath
+                    sharedPreferences.edit().putString("selected_model", currentModel).apply()
+                    binding.browseModelButton.setImageResource(R.drawable.importmodel_check)
+                    Toast.makeText(this, "$selectedModelName selected", Toast.LENGTH_SHORT).show()
+                }
+                .show()
+        } catch (e: IOException) {
+            e.printStackTrace()
+            Toast.makeText(this, "Error listing models.", Toast.LENGTH_SHORT).show()
         }
-        openModelLauncher.launch(intent)
     }
 
     private fun showMarkingOptions() {
@@ -233,6 +255,16 @@ class MainActivity : AppCompatActivity() {
         binding.imageSize.visibility = View.VISIBLE
         binding.extendListPanelButton.visibility = View.VISIBLE
         binding.searchEditText.visibility = View.GONE
+        binding.searchEditText.text.clear()
+
+        currentRecord?.let {
+            binding.imageName.text = it.name
+            binding.imageSize.text = "${it.width}x${it.height}"
+        } ?: run {
+            binding.imageName.text = "Image Name"
+            binding.imageSize.text = "Size"
+        }
+
         val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
         imm.hideSoftInputFromWindow(binding.searchEditText.windowToken, 0)
     }
