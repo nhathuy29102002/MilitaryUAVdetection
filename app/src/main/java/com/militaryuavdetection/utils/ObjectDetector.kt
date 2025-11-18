@@ -18,7 +18,7 @@ import kotlin.math.min
 class ObjectDetector(private val context: Context) {
 
     // --- CẤU HÌNH ---
-    private val INPUT_SIZE = 640 // Kích thước input mặc định của YOLOv8
+    private val INPUT_SIZE = 416 // Kích thước input mặc định của YOLOv8
     private val CONFIDENCE_THRESHOLD = 0.25f // Mức tin cậy (chỉnh lên 0.5 nếu muốn lọc kỹ hơn)
     private val IOU_THRESHOLD = 0.5f // Ngưỡng lọc trùng nhau (NMS)
 
