@@ -12,7 +12,6 @@ import android.text.TextWatcher
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
-import android.widget.EditText
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -22,14 +21,20 @@ import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import com.militaryuavdetection.database.ImageRecord
 import com.militaryuavdetection.databinding.ActivityMainBinding
 import com.militaryuavdetection.ui.adapter.FileListAdapter
+import com.militaryuavdetection.ui.adapter.GridSpacingItemDecoration
+import com.militaryuavdetection.utils.ObjectDetector
 import com.militaryuavdetection.viewmodel.ImageViewModel
 import com.militaryuavdetection.viewmodel.ImageViewModelFactory
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import java.io.IOException
+
+enum class MarkingMode { OFF, MARK, BOX, NAME, CONFIDENCE }
 
 class MainActivity : AppCompatActivity() {
 
@@ -39,6 +44,10 @@ class MainActivity : AppCompatActivity() {
     private var isListPanelExtended = false
     private lateinit var sharedPreferences: SharedPreferences
     private var currentRecord: ImageRecord? = null
+    private var markingMode = MarkingMode.OFF
+    private var itemDecoration: GridSpacingItemDecoration? = null
+    private lateinit var objectDetector: ObjectDetector
+    private val gson = Gson()
 
     private val imageViewModel: ImageViewModel by viewModels {
         ImageViewModelFactory((application as MilitaryUavApplication).database.imageRecordDao())
@@ -57,12 +66,7 @@ class MainActivity : AppCompatActivity() {
                         Intent.FLAG_GRANT_READ_URI_PERMISSION
                     )
                 }
-                insertUrisAsRecords(uris)
-                lifecycleScope.launch{
-                    imageViewModel.getLastInsertedId()?.let { lastId ->
-                        imageViewModel.getRecordById(lastId)?.let { selectRecord(it) }
-                    }
-                }
+                insertUrisAndAnalyze(uris)
             }
         }
     }
@@ -73,9 +77,14 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         sharedPreferences = getSharedPreferences("MilitaryUavPrefs", Context.MODE_PRIVATE)
+        objectDetector = ObjectDetector(this)
+
         currentModel = sharedPreferences.getString("selected_model", null)
-        if (currentModel != null) {
-            binding.browseModelButton.setImageResource(R.drawable.importmodel_check)
+        currentModel?.let {
+            lifecycleScope.launch {
+                objectDetector.loadModel(it)
+                binding.browseModelButton.setImageResource(R.drawable.importmodel_check)
+            }
         }
 
         setupRecyclerView()
@@ -95,10 +104,18 @@ class MainActivity : AppCompatActivity() {
 
     private fun selectRecord(record: ImageRecord){
         currentRecord = record
+        fileListAdapter.updateSelection(record)
         try {
             binding.imagePanel.setImageURI(record.uri.toUri())
             binding.imageName.text = record.name
             binding.imageSize.text = "${record.width}x${record.height}"
+
+            val type = object : TypeToken<List<ObjectDetector.DetectionResult>>() {}.type
+            val detections: List<ObjectDetector.DetectionResult> = record.boundingBoxes?.let {
+                gson.fromJson(it, type)
+            } ?: emptyList()
+            binding.imagePanel.setDetections(detections)
+
         } catch (e: SecurityException) {
             Toast.makeText(this, "Permission denied for ${record.name}. Please re-import the file.", Toast.LENGTH_LONG).show()
         }
@@ -108,14 +125,15 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             imageViewModel.allRecords.collect { records ->
                 fileListAdapter.updateData(records)
+                currentRecord?.let { fileListAdapter.updateSelection(it) }
             }
         }
     }
 
     private fun setupClickListeners() {
-        binding.browseImageButton.setOnClickListener { showImageImportOptions() }
+        binding.browseImageButton.setOnClickListener { openImagePicker() }
         binding.browseModelButton.setOnClickListener { openModelPicker() }
-        binding.markTypeButton.setOnClickListener { showMarkingOptions() }
+        binding.markTypeButton.setOnClickListener { cycleMarkingMode() }
         binding.cameraButton.setOnClickListener { showCameraOptions() }
         binding.exportButton.setOnClickListener { selectExportLocation() }
 
@@ -152,6 +170,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun cycleMarkingMode() {
+        markingMode = MarkingMode.values()[(markingMode.ordinal + 1) % MarkingMode.values().size]
+        binding.markTypeButton.text = markingMode.name
+        // You might want to update the image panel to reflect the new marking mode
+        binding.imagePanel.invalidate() // Redraws the view
+    }
+
     private fun toggleListPanelExtension() {
         isListPanelExtended = !isListPanelExtended
         if (isListPanelExtended) {
@@ -169,25 +194,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showImageImportOptions(){
-        val options = arrayOf("Import Files", "Import Folder")
-        AlertDialog.Builder(this)
-            .setTitle("Import Media")
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> {
-                        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                            addCategory(Intent.CATEGORY_OPENABLE)
-                            type = "*/*"
-                            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "video/*"))
-                            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
-                        }
-                        openFilesLauncher.launch(intent)
-                    }
-                    1 -> { /* Logic for folder import - requires ACTION_OPEN_DOCUMENT_TREE */ }
-                }
-            }
-            .show()
+    private fun openImagePicker() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "video/*"))
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+        }
+        openFilesLauncher.launch(intent)
     }
 
     private fun openModelPicker() {
@@ -203,26 +217,19 @@ class MainActivity : AppCompatActivity() {
                 .setItems(models) { _, which ->
                     val selectedModelName = models[which]
                     val modelPath = "models/$selectedModelName"
-                    currentModel = modelPath
-                    sharedPreferences.edit().putString("selected_model", currentModel).apply()
-                    binding.browseModelButton.setImageResource(R.drawable.importmodel_check)
-                    Toast.makeText(this, "$selectedModelName selected", Toast.LENGTH_SHORT).show()
+                    lifecycleScope.launch {
+                        objectDetector.loadModel(modelPath)
+                        currentModel = modelPath
+                        sharedPreferences.edit().putString("selected_model", currentModel).apply()
+                        binding.browseModelButton.setImageResource(R.drawable.importmodel_check)
+                        Toast.makeText(this@MainActivity, "$selectedModelName selected", Toast.LENGTH_SHORT).show()
+                    }
                 }
                 .show()
         } catch (e: IOException) {
             e.printStackTrace()
             Toast.makeText(this, "Error listing models.", Toast.LENGTH_SHORT).show()
         }
-    }
-
-    private fun showMarkingOptions() {
-        val options = arrayOf("No Bounding Box", "Bounding Box", "Box + Instance", "Box + Confidence")
-        AlertDialog.Builder(this)
-            .setTitle("Select Marking Type")
-            .setItems(options) { _, which ->
-                // Handle selection
-            }
-            .show()
     }
 
     private fun showCameraOptions() {
@@ -269,49 +276,70 @@ class MainActivity : AppCompatActivity() {
         imm.hideSoftInputFromWindow(binding.searchEditText.windowToken, 0)
     }
 
-    private fun insertUrisAsRecords(uris: List<Uri>) {
-        val records = uris.mapNotNull { uri ->
-            try {
-                val pfd = contentResolver.openFileDescriptor(uri, "r") ?: return@mapNotNull null
-                val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, options)
-                pfd.close()
+    private fun insertUrisAndAnalyze(uris: List<Uri>) {
+        lifecycleScope.launch {
+            val records = uris.mapNotNull { uri ->
+                try {
+                    val pfd = contentResolver.openFileDescriptor(uri, "r") ?: return@mapNotNull null
+                    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, options)
+                    pfd.close()
 
-                val mediaType = when {
-                    options.outMimeType?.startsWith("image/") == true -> "IMAGE"
-                    options.outMimeType?.startsWith("video/") == true -> "VIDEO"
-                    else -> return@mapNotNull null
+                    val mediaType = when {
+                        options.outMimeType?.startsWith("image/") == true -> "IMAGE"
+                        options.outMimeType?.startsWith("video/") == true -> "VIDEO"
+                        else -> return@mapNotNull null
+                    }
+
+                    val documentFile = androidx.documentfile.provider.DocumentFile.fromSingleUri(this@MainActivity, uri)
+
+                    val detections = if (mediaType == "IMAGE") objectDetector.analyzeImage(uri) else emptyList()
+                    val bboxesJson = gson.toJson(detections)
+
+                    ImageRecord(
+                        uri = uri.toString(),
+                        name = documentFile?.name ?: "Unknown",
+                        dateModified = documentFile?.lastModified() ?: 0,
+                        size = documentFile?.length() ?: 0,
+                        mediaType = mediaType,
+                        width = options.outWidth,
+                        height = options.outHeight,
+                        boundingBoxes = bboxesJson,
+                        confidence = null, // This can be populated from detections if needed
+                        isSaved = false
+                    )
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    null
                 }
-
-                val documentFile = androidx.documentfile.provider.DocumentFile.fromSingleUri(this, uri)
-
-                ImageRecord(
-                    uri = uri.toString(),
-                    name = documentFile?.name ?: "Unknown",
-                    dateModified = documentFile?.lastModified() ?: 0,
-                    size = documentFile?.length() ?: 0,
-                    mediaType = mediaType,
-                    width = options.outWidth,
-                    height = options.outHeight,
-                    boundingBoxes = null,
-                    confidence = null,
-                    isSaved = false
-                )
-            } catch (e: Exception) {
-                e.printStackTrace()
-                null
             }
-        }
-        if (records.isNotEmpty()) {
-            imageViewModel.insertAll(records)
+            if (records.isNotEmpty()) {
+                imageViewModel.insertAll(records)
+                // Automatically select the last imported image
+                imageViewModel.getLastInsertedId()?.let { lastId ->
+                    imageViewModel.getRecordById(lastId)?.let { selectRecord(it) }
+                }
+            }
         }
     }
 
     private fun setViewMode(viewMode: FileListAdapter.ViewMode) {
         fileListAdapter.setViewMode(viewMode)
-        binding.recyclerView.layoutManager = when (viewMode) {
-            FileListAdapter.ViewMode.ICON -> GridLayoutManager(this, 4)
-            FileListAdapter.ViewMode.DETAIL, FileListAdapter.ViewMode.CONTENT -> LinearLayoutManager(this)
+
+        itemDecoration?.let { binding.recyclerView.removeItemDecoration(it) }
+
+        when (viewMode) {
+            FileListAdapter.ViewMode.ICON -> {
+                val spanCount = 4
+                val spacing = 8
+                val includeEdge = true
+                itemDecoration = GridSpacingItemDecoration(spanCount, spacing, includeEdge)
+                binding.recyclerView.addItemDecoration(itemDecoration!!)
+                binding.recyclerView.layoutManager = GridLayoutManager(this, spanCount)
+            }
+            FileListAdapter.ViewMode.DETAIL, FileListAdapter.ViewMode.CONTENT -> {
+                binding.recyclerView.layoutManager = LinearLayoutManager(this)
+            }
         }
     }
 }

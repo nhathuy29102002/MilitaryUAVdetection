@@ -12,5 +12,8 @@
         <!-- Status bar color. -->
         <item name="android:statusBarColor">?attr/colorPrimaryVariant</item>
         <!-- Customize your theme here. -->
+
+        <!-- Custom Ripple Color for better visibility on dark backgrounds -->
+        <item name="colorControlHighlight">#40FFFFFF</item>
     </style>
 </resources>

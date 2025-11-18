@@ -1,5 +1,6 @@
 package com.militaryuavdetection.ui.adapter
 
+import android.graphics.Color
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -15,6 +16,7 @@ import java.util.*
 class FileListAdapter(private var records: List<ImageRecord>, private var allRecords: List<ImageRecord>) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     var onItemClick: ((ImageRecord) -> Unit)? = null
+    var selectedRecord: ImageRecord? = null
     private var viewMode = ViewMode.ICON
 
     enum class ViewMode {
@@ -45,6 +47,13 @@ class FileListAdapter(private var records: List<ImageRecord>, private var allRec
 
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
         val record = records[position]
+
+        // Handle selection highlight
+        val isSelected = record.id == selectedRecord?.id
+        holder.itemView.setBackgroundColor(
+            if (isSelected) Color.parseColor("#4c4c52") else Color.TRANSPARENT
+        )
+
         when (holder) {
             is IconViewHolder -> holder.bind(record)
             is DetailViewHolder -> holder.bind(record)
@@ -62,9 +71,24 @@ class FileListAdapter(private var records: List<ImageRecord>, private var allRec
         notifyDataSetChanged()
     }
 
+    fun updateSelection(newSelectedRecord: ImageRecord?) {
+        val oldSelectedPosition = records.indexOfFirst { it.id == selectedRecord?.id }
+        val newSelectedPosition = records.indexOfFirst { it.id == newSelectedRecord?.id }
+
+        selectedRecord = newSelectedRecord
+
+        if (oldSelectedPosition != -1) {
+            notifyItemChanged(oldSelectedPosition)
+        }
+        if (newSelectedPosition != -1) {
+            notifyItemChanged(newSelectedPosition)
+        }
+    }
+
     fun updateData(newRecords: List<ImageRecord>) {
         allRecords = newRecords
         records = newRecords
+        // The selectedRecord is managed by MainActivity, just redraw everything
         notifyDataSetChanged()
     }
 
@@ -74,6 +98,7 @@ class FileListAdapter(private var records: List<ImageRecord>, private var allRec
         } else {
             allRecords.filter { it.name.contains(query, ignoreCase = true) }
         }
+        // The selectedRecord is managed by MainActivity, just redraw everything
         notifyDataSetChanged()
     }
 
@@ -118,9 +143,8 @@ class FileListAdapter(private var records: List<ImageRecord>, private var allRec
             val date = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date(record.dateModified))
             dateView.text = date
 
-            // Assuming record.fileSize is in bytes
-            val fileSizeInMB = record.size / (1024.0 * 1024.0)
-            fileSizeView.text = String.format("%.2fMB", fileSizeInMB)
+            val fileSizeInKB = record.size / 1024
+            fileSizeView.text = if (fileSizeInKB > 0) "${fileSizeInKB}KB" else "${record.size}B"
 
             imageSizeView.text = "${record.width}x${record.height}"
         }

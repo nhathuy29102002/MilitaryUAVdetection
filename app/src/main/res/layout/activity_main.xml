@@ -28,49 +28,49 @@
 
         <ImageButton
             android:id="@+id/browseImageButton"
-            style="?android:attr/buttonBarButtonStyle"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:layout_weight="1"
             android:src="@drawable/importimage"
             android:scaleType="fitCenter"
+            android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="Browse Media"/>
 
         <Button
             android:id="@+id/markTypeButton"
-            style="?android:attr/buttonBarButtonStyle"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:layout_weight="1"
             android:text="Mark"
+            android:background="?attr/selectableItemBackground"
             android:textColor="@android:color/white"/>
 
         <Button
             android:id="@+id/cameraButton"
-            style="?android:attr/buttonBarButtonStyle"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:layout_weight="1"
             android:text="Camera"
+            android:background="?attr/selectableItemBackground"
             android:textColor="@android:color/white"/>
 
         <Button
             android:id="@+id/exportButton"
-            style="?android:attr/buttonBarButtonStyle"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:layout_weight="1"
             android:text="Export"
+            android:background="?attr/selectableItemBackground"
             android:textColor="@android:color/white"/>
 
         <ImageButton
             android:id="@+id/browseModelButton"
-            style="?android:attr/buttonBarButtonStyle"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:layout_weight="1"
             android:src="@drawable/importmodel"
             android:scaleType="fitCenter"
+            android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="Browse Model"/>
     </LinearLayout>
 
@@ -90,6 +90,7 @@
             android:id="@+id/searchIcon"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:background="?attr/selectableItemBackgroundBorderless"
             android:src="@android:drawable/ic_menu_search" />
 
         <EditText
@@ -121,6 +122,7 @@
             android:id="@+id/extendListPanelButton"
             android:layout_width="40dp"
             android:layout_height="wrap_content"
+            android:background="?attr/selectableItemBackgroundBorderless"
             android:src="@drawable/screenshot" />
     </LinearLayout>
 
@@ -142,7 +144,7 @@
             android:layout_height="0dp"
             android:layout_weight="1"
             android:src="@android:drawable/ic_dialog_dialer"
-            android:background="@android:color/transparent"
+            android:background="?attr/selectableItemBackgroundBorderless"
             android:scaleType="fitCenter"
             android:padding="6dp"/>
         <ImageButton
@@ -151,7 +153,7 @@
             android:layout_height="0dp"
             android:layout_weight="1"
             android:src="@android:drawable/ic_menu_sort_by_size"
-            android:background="@android:color/transparent"
+            android:background="?attr/selectableItemBackgroundBorderless"
             android:scaleType="fitCenter"
             android:padding="6dp"/>
         <ImageButton
@@ -160,7 +162,7 @@
             android:layout_height="0dp"
             android:layout_weight="1"
             android:src="@android:drawable/ic_menu_agenda"
-            android:background="@android:color/transparent"
+            android:background="?attr/selectableItemBackgroundBorderless"
             android:scaleType="fitCenter"
             android:padding="6dp"/>
 
@@ -173,7 +175,7 @@
         android:orientation="vertical"
         app:layout_constraintTop_toBottomOf="@+id/detailBar"
         app:layout_constraintBottom_toTopOf="@+id/taskbar"
-        app:layout_constraintStart_toEndOf="@id/view_mode_buttons"
+        app:layout_constraintStart_toEndOf="@+id/view_mode_buttons"
         app:layout_constraintEnd_toEndOf="parent">
 
 
