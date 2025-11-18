@@ -1,13 +1,18 @@
 package com.militaryuavdetection
 
 import android.app.Activity
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.MediaStore
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.View
@@ -29,12 +34,10 @@ import com.militaryuavdetection.database.ImageRecord
 import com.militaryuavdetection.databinding.ActivityMainBinding
 import com.militaryuavdetection.ui.adapter.FileListAdapter
 import com.militaryuavdetection.ui.adapter.GridSpacingItemDecoration
-import com.militaryuavdetection.ui.view.ZoomableImageView
 import com.militaryuavdetection.utils.ObjectDetector
 import com.militaryuavdetection.viewmodel.ImageViewModel
 import com.militaryuavdetection.viewmodel.ImageViewModelFactory
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
@@ -42,6 +45,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStreamReader
+import java.io.OutputStream
 
 enum class MarkingMode { OFF, MARK, BOX, NAME, CONF, SMART }
 
@@ -69,7 +73,6 @@ class MainActivity : AppCompatActivity() {
         7 to Color.parseColor("#ed3c4d"),
         8 to Color.parseColor("#fe7ef7")
     )
-
 
     private val imageViewModel: ImageViewModel by viewModels {
         ImageViewModelFactory((application as MilitaryUavApplication).database.imageRecordDao())
@@ -168,6 +171,10 @@ class MainActivity : AppCompatActivity() {
                 if (currentRecord != null && records.none { it.id == currentRecord!!.id }) {
                     clearSelection()
                 }
+                // Auto-select the last imported record if nothing is selected
+                if (currentRecord == null && records.isNotEmpty()) {
+                    records.maxByOrNull { it.id }?.let { selectRecord(it) }
+                }
             }
         }
     }
@@ -177,7 +184,7 @@ class MainActivity : AppCompatActivity() {
         binding.browseModelButton.setOnClickListener { openModelPicker() }
         binding.markTypeButton.setOnClickListener { cycleMarkingMode() }
         binding.cameraButton.setOnClickListener { showCameraOptions() }
-        binding.exportButton.setOnClickListener { selectExportLocation() }
+        binding.exportButton.setOnClickListener { exportImage() }
 
         binding.fitImageButton.setOnClickListener {
             binding.imagePanel.fitImage()
@@ -235,7 +242,7 @@ class MainActivity : AppCompatActivity() {
     private fun cycleMarkingMode() {
         markingMode = MarkingMode.values()[(markingMode.ordinal + 1) % MarkingMode.values().size]
         binding.markTypeButton.text = markingMode.name
-        currentRecord?.let { selectRecord(it) }
+        currentRecord?.let { selectRecord(it) } // Re-select to redraw with new mode
     }
 
     private fun toggleListPanelExtension() {
@@ -254,6 +261,10 @@ class MainActivity : AppCompatActivity() {
             hideSearch()
         }
     }
+
+    private fun showCameraOptions() { /* ... */ }
+    private fun showSearch() { /* ... */ }
+    private fun hideSearch() { /* ... */ }
 
     private fun openImagePicker() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
@@ -291,11 +302,61 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Error listing models.", Toast.LENGTH_SHORT).show()
         }
     }
+    private fun exportImage() {
+        if (currentRecord == null) {
+            Toast.makeText(this, "No image selected to export", Toast.LENGTH_SHORT).show()
+            return
+        }
 
-    private fun showCameraOptions() { /* ... */ }
-    private fun selectExportLocation() { /* ... */ }
-    private fun showSearch() { /* ... */ }
-    private fun hideSearch() { /* ... */ }
+        val bitmapToExport = binding.imagePanel.createExportBitmap()
+        if (bitmapToExport == null) {
+            Toast.makeText(this, "Could not create image for export", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            val fileName = "Exported_${currentRecord?.name?.substringBeforeLast(".")}.png"
+            val resolver = contentResolver
+
+            try {
+                val fos: OutputStream
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val contentValues = ContentValues().apply {
+                        put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                        put(MediaStore.MediaColumns.MIME_TYPE, "image/png")
+                        put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + File.separator + "Export")
+                    }
+                    val imageUri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+                        ?: throw IOException("Failed to create new MediaStore entry.")
+                    fos = resolver.openOutputStream(imageUri)
+                        ?: throw IOException("Failed to get output stream.")
+                } else {
+                    @Suppress("DEPRECATION")
+                    val exportDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Export")
+                    if (!exportDir.exists()) {
+                        exportDir.mkdirs()
+                    }
+                    val imageFile = File(exportDir, fileName)
+                    fos = FileOutputStream(imageFile)
+                }
+
+                fos.use { stream ->
+                    if (!bitmapToExport.compress(Bitmap.CompressFormat.PNG, 100, stream)) {
+                        throw IOException("Failed to save bitmap.")
+                    }
+                }
+
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@MainActivity, "Image saved to Downloads/Export", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@MainActivity, "Failed to save image: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
 
     private fun clearSelection() {
         currentRecord = null
@@ -304,18 +365,15 @@ class MainActivity : AppCompatActivity() {
         binding.imagePanel.setDetections(emptyList(), markingMode, instanceValues, colorMap)
         binding.imageName.text = "Image Name"
         binding.imageSize.text = "Size"
+        binding.fitImageButton.visibility = View.GONE
     }
 
     private fun insertUrisAndAnalyze(uris: List<Uri>) {
         lifecycleScope.launch {
-            var reprocessed = false
+            var lastInsertedId: Long? = null
             val recordsToInsert = uris.mapNotNull { uri ->
                 try {
-                    val existingRecord = imageViewModel.getRecordByUri(uri.toString())
-                    if (existingRecord != null) {
-                        imageViewModel.delete(existingRecord)
-                        reprocessed = true
-                    }
+                    imageViewModel.getRecordByUri(uri.toString())?.let { imageViewModel.delete(it) }
 
                     val pfd = contentResolver.openFileDescriptor(uri, "r") ?: return@mapNotNull null
                     val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -323,16 +381,16 @@ class MainActivity : AppCompatActivity() {
                     pfd.close()
 
                     val mediaType = if (options.outMimeType?.startsWith("image/") == true) "IMAGE" else "VIDEO"
-                    val documentFile = androidx.documentfile.provider.DocumentFile.fromSingleUri(this@MainActivity, uri)
+                    val documentFile = androidx.documentfile.provider.DocumentFile.fromSingleUri(this@MainActivity, uri)!!
 
                     val detections = if (mediaType == "IMAGE" && currentModel != null) objectDetector.analyzeImage(uri) else emptyList()
                     val bboxesJson = gson.toJson(detections)
 
                     ImageRecord(
                         uri = uri.toString(),
-                        name = documentFile?.name ?: "Unknown",
-                        dateModified = documentFile?.lastModified() ?: 0,
-                        size = documentFile?.length() ?: 0,
+                        name = documentFile.name ?: "Unknown",
+                        dateModified = documentFile.lastModified(),
+                        size = documentFile.length(),
                         mediaType = mediaType,
                         width = options.outWidth,
                         height = options.outHeight,
@@ -345,11 +403,11 @@ class MainActivity : AppCompatActivity() {
             }
             if (recordsToInsert.isNotEmpty()) {
                 imageViewModel.insertAll(recordsToInsert)
-                if (reprocessed) {
-                    Toast.makeText(this@MainActivity, "Frame updated for existing image(s)", Toast.LENGTH_SHORT).show()
-                }
-                imageViewModel.getLastInsertedId()?.let { lastId ->
-                    imageViewModel.getRecordById(lastId)?.let { selectRecord(it) }
+                lastInsertedId = imageViewModel.getLastInsertedId()
+            }
+            lastInsertedId?.let {
+                imageViewModel.getRecordById(it)?.let { record ->
+                    selectRecord(record)
                 }
             }
         }
@@ -357,30 +415,26 @@ class MainActivity : AppCompatActivity() {
 
     private suspend fun loadSampleImages() = withContext(Dispatchers.IO) {
         val importDir = "import"
-        try {
-            val sampleImageNames = assets.list(importDir)
-            if (sampleImageNames.isNullOrEmpty()) return@withContext
+        val sampleImageNames = assets.list(importDir)?.filter { it.endsWith(".jpg") || it.endsWith(".png") } ?: return@withContext
 
-            val tempFileUris = sampleImageNames.mapNotNull { fileName ->
-                try {
-                    val inputStream = assets.open("$importDir/$fileName")
-                    val tempFile = File(cacheDir, fileName)
-                    val outputStream = FileOutputStream(tempFile)
-                    inputStream.copyTo(outputStream)
-                    Uri.fromFile(tempFile)
-                } catch (e: IOException) {
-                    e.printStackTrace()
-                    null
+        val tempFileUris = sampleImageNames.mapNotNull { fileName ->
+            try {
+                val tempFile = File(cacheDir, fileName)
+                assets.open("$importDir/$fileName").use { input ->
+                    FileOutputStream(tempFile).use { output ->
+                        input.copyTo(output)
+                    }
                 }
+                Uri.fromFile(tempFile)
+            } catch (e: IOException) {
+                e.printStackTrace()
+                null
             }
-            if (tempFileUris.isNotEmpty()) {
-                withContext(Dispatchers.Main) {
-                    insertUrisAndAnalyze(tempFileUris)
-                }
+        }
+        if (tempFileUris.isNotEmpty()) {
+            withContext(Dispatchers.Main) {
+                insertUrisAndAnalyze(tempFileUris)
             }
-
-        } catch (e: IOException) {
-            e.printStackTrace()
         }
     }
 

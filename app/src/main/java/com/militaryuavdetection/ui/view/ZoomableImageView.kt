@@ -1,6 +1,7 @@
 package com.militaryuavdetection.ui.view
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
@@ -8,17 +9,19 @@ import android.graphics.Paint
 import android.graphics.PointF
 import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.drawable.BitmapDrawable
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import androidx.appcompat.widget.AppCompatImageView
 import com.militaryuavdetection.MarkingMode
 import com.militaryuavdetection.utils.ObjectDetector
+import kotlin.math.max
 
 class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImageView(context, attrs) {
 
     private var scaleGestureDetector: ScaleGestureDetector
-    private val imageMatrix = Matrix()
+    private val viewMatrix = Matrix()
     private var scaleFactor = 1.0f
     private var lastTouch = PointF()
     private var isDragging = false
@@ -29,7 +32,7 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
     private var colorMap: Map<Int, Int> = emptyMap()
 
     private val boxPaint = Paint()
-    private val textPaint = Paint().apply { textSize = 40.0f }
+    private val textPaint = Paint()
     private val backgroundPaint = Paint()
 
     var onTransformChanged: (() -> Unit)? = null
@@ -49,44 +52,42 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
         this.markingMode = markingMode
         this.instanceValues = instanceValues
         this.colorMap = colorMap
-        fitImage()
+        fitImage(false) // Don't trigger callback on initial set
         invalidate()
     }
 
-    fun fitImage() {
+    fun fitImage(notify: Boolean = true) {
         if (drawable == null || width == 0 || height == 0) return
 
         val dWidth = drawable.intrinsicWidth.toFloat()
         val dHeight = drawable.intrinsicHeight.toFloat()
 
-        val scale: Float
-        var dx = 0f
-        var dy = 0f
+        val scale = if (dWidth * height > width * dHeight) width / dWidth else height / dHeight
+        val dx = (width - dWidth * scale) * 0.5f
+        val dy = (height - dHeight * scale) * 0.5f
 
-        if (dWidth * height > width * dHeight) { // Image is wider
-            scale = width.toFloat() / dWidth
-            dy = (height - dHeight * scale) * 0.5f
-        } else { // Image is taller or square
-            scale = height.toFloat() / dHeight
-            dx = (width - dWidth * scale) * 0.5f
+        viewMatrix.setScale(scale, scale)
+        viewMatrix.postTranslate(dx, dy)
+        imageMatrix = viewMatrix // Use imageMatrix provided by AppCompatImageView
+
+        if (notify) {
+            onTransformChanged?.invoke()
         }
-
-        imageMatrix.setScale(scale, scale)
-        imageMatrix.postTranslate(dx, dy)
-        setImageMatrix(imageMatrix)
-        scaleFactor = scale
-        onTransformChanged?.invoke()
     }
-
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        if (drawable == null) return
+        drawDetectionsOnCanvas(canvas, imageMatrix)
+    }
+
+    private fun drawDetectionsOnCanvas(canvas: Canvas, matrix: Matrix) {
         if (drawable == null || markingMode == MarkingMode.OFF) return
 
-        val viewMatrix = imageMatrix
         val drawableRect = RectF(0f, 0f, drawable.intrinsicWidth.toFloat(), drawable.intrinsicHeight.toFloat())
-        val viewRect = RectF()
-        viewMatrix.mapRect(viewRect, drawableRect)
+        val mappedRect = RectF()
+        matrix.mapRect(mappedRect, drawableRect)
+        val currentScale = mappedRect.width() / drawable.intrinsicWidth.toFloat()
 
         val detectionsToDraw = when (markingMode) {
             MarkingMode.SMART -> {
@@ -97,7 +98,7 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
                 val rest = detections.minus(top3.toSet())
                 top3.map { it to true } + rest.map { it to false } // true = box, false = mark
             }
-            else -> detections.map { it to true } // All others get a "box" (or label)
+            else -> detections.map { it to true }
         }
 
         detectionsToDraw.forEach { (detection, drawBox) ->
@@ -106,47 +107,37 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
             boxPaint.color = color
 
             val originalBox = detection.boundingBox
-            val mappedBox = RectF(
-                originalBox.left / drawable.intrinsicWidth * viewRect.width() + viewRect.left,
-                originalBox.top / drawable.intrinsicHeight * viewRect.height() + viewRect.top,
-                originalBox.right / drawable.intrinsicWidth * viewRect.width() + viewRect.left,
-                originalBox.bottom / drawable.intrinsicHeight * viewRect.height() + viewRect.top
-            )
+            val mappedBox = RectF().apply {
+                matrix.mapRect(this, originalBox)
+            }
 
-            val centerX = mappedBox.centerX()
-            val centerY = mappedBox.centerY()
+            val strokeWidth = max(1f, currentScale * 2)
+            boxPaint.strokeWidth = strokeWidth
 
             when (markingMode) {
                 MarkingMode.MARK -> {
                     boxPaint.style = Paint.Style.FILL
-                    canvas.drawRect(centerX - 18, centerY - 18, centerX + 18, centerY + 18, boxPaint)
+                    val markSize = max(4f, currentScale * 6)
+                    canvas.drawRect(mappedBox.centerX() - markSize, mappedBox.centerY() - markSize, mappedBox.centerX() + markSize, mappedBox.centerY() + markSize, boxPaint)
                 }
                 MarkingMode.BOX -> {
                     boxPaint.style = Paint.Style.STROKE
-                    boxPaint.strokeWidth = 5.0f
                     canvas.drawRect(mappedBox, boxPaint)
                 }
-                MarkingMode.NAME -> {
+                MarkingMode.NAME, MarkingMode.CONF -> {
                     boxPaint.style = Paint.Style.STROKE
-                    boxPaint.strokeWidth = 5.0f
                     canvas.drawRect(mappedBox, boxPaint)
-                    drawLabel(canvas, mappedBox, detection.label, value, color)
-                }
-                MarkingMode.CONF -> {
-                    boxPaint.style = Paint.Style.STROKE
-                    boxPaint.strokeWidth = 5.0f
-                    canvas.drawRect(mappedBox, boxPaint)
-                    val label = "${detection.label} ${String.format("%.2f", detection.confidence)}"
-                    drawLabel(canvas, mappedBox, label, value, color)
+                    val labelText = if (markingMode == MarkingMode.NAME) detection.label else "${detection.label} ${String.format("%.2f", detection.confidence)}"
+                    drawLabel(canvas, mappedBox, labelText, value, color, currentScale)
                 }
                 MarkingMode.SMART -> {
                     if (drawBox) {
                         boxPaint.style = Paint.Style.STROKE
-                        boxPaint.strokeWidth = 5.0f
                         canvas.drawRect(mappedBox, boxPaint)
                     } else {
                         boxPaint.style = Paint.Style.FILL
-                        canvas.drawRect(centerX - 8, centerY - 8, centerX + 8, centerY + 8, boxPaint)
+                        val markSize = max(2f, currentScale * 3)
+                        canvas.drawRect(mappedBox.centerX() - markSize, mappedBox.centerY() - markSize, mappedBox.centerX() + markSize, mappedBox.centerY() + markSize, boxPaint)
                     }
                 }
                 else -> {}
@@ -154,45 +145,35 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
         }
     }
 
-    private fun drawLabel(canvas: Canvas, box: RectF, text: String, value: Int, color: Int) {
-        // 1. Set colors
+    private fun drawLabel(canvas: Canvas, box: RectF, text: String, value: Int, color: Int, scale: Float) {
         backgroundPaint.color = color
         textPaint.color = if (value == 0) Color.BLACK else Color.WHITE
 
-        // 2. Measure text
-        val padding = 8f
+        val textSize = max(12f, scale * 15f)
+        textPaint.textSize = textSize
+        val padding = textSize / 4f
+
         val textBounds = Rect()
         textPaint.getTextBounds(text, 0, text.length, textBounds)
         val textHeight = textBounds.height().toFloat()
-
         val backgroundHeight = textHeight + (2 * padding)
         val backgroundWidth = textPaint.measureText(text) + (2 * padding)
 
-        // 3. Determine position and draw
-        var backgroundRect: RectF
-
-        // Try position above the box
-        if (box.top - backgroundHeight >= 0) {
-            backgroundRect = RectF(box.left, box.top - backgroundHeight, box.left + backgroundWidth, box.top)
-        }
-        // Else, try position below the box
-        else if (box.bottom + backgroundHeight <= height) {
-             backgroundRect = RectF(box.left, box.bottom, box.left + backgroundWidth, box.bottom + backgroundHeight)
-        }
-        // Else, position inside top-left corner
-        else {
-            backgroundRect = RectF(box.left, box.top, box.left + backgroundWidth, box.top + backgroundHeight)
+        val backgroundRect = if (box.top - backgroundHeight >= 0) {
+            RectF(box.left, box.top - backgroundHeight, box.left + backgroundWidth, box.top)
+        } else if (box.bottom + backgroundHeight <= canvas.height) {
+            RectF(box.left, box.bottom, box.left + backgroundWidth, box.bottom + backgroundHeight)
+        } else {
+            RectF(box.left, box.top, box.left + backgroundWidth, box.top + backgroundHeight)
         }
 
         canvas.drawRect(backgroundRect, backgroundPaint)
-        // Adjust Y position for text baseline
-        val textY = backgroundRect.centerY() + textHeight / 2 - textBounds.bottom / 2
-        canvas.drawText(text, backgroundRect.left + padding, textY, textPaint)
+        val textY = backgroundRect.top + padding
+        canvas.drawText(text, backgroundRect.left + padding, textY - textBounds.top, textPaint)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         scaleGestureDetector.onTouchEvent(event)
-
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
                 lastTouch.set(event.x, event.y)
@@ -202,29 +183,39 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
                 if (isDragging && !scaleGestureDetector.isInProgress) {
                     val dx = event.x - lastTouch.x
                     val dy = event.y - lastTouch.y
-                    imageMatrix.postTranslate(dx, dy)
-                    setImageMatrix(imageMatrix)
+                    viewMatrix.postTranslate(dx, dy)
+                    imageMatrix = viewMatrix
                     lastTouch.set(event.x, event.y)
                     onTransformChanged?.invoke()
                 }
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                isDragging = false
-            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> isDragging = false
         }
         return true
     }
 
     private inner class ScaleListener : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScale(detector: ScaleGestureDetector): Boolean {
-            val newScale = scaleFactor * detector.scaleFactor
-            if (newScale >= 1.0f) { // Prevent zooming out too much
-                scaleFactor = newScale
-                imageMatrix.postScale(detector.scaleFactor, detector.scaleFactor, detector.focusX, detector.focusY)
-                setImageMatrix(imageMatrix)
+            val newScaleFactor = scaleFactor * detector.scaleFactor
+            if (newScaleFactor >= 1.0f) { // Prevent zooming out beyond initial fit
+                scaleFactor = newScaleFactor
+                viewMatrix.postScale(detector.scaleFactor, detector.scaleFactor, detector.focusX, detector.focusY)
+                imageMatrix = viewMatrix
                 onTransformChanged?.invoke()
             }
             return true
         }
+    }
+
+    fun createExportBitmap(): Bitmap? {
+        val bmpDrawable = drawable as? BitmapDrawable ?: return null
+        val originalBitmap = bmpDrawable.bitmap
+        val exportBitmap = originalBitmap.copy(Bitmap.Config.ARGB_8888, true)
+        val canvas = Canvas(exportBitmap)
+
+        val exportMatrix = Matrix() // Identity matrix for original scale
+        drawDetectionsOnCanvas(canvas, exportMatrix)
+
+        return exportBitmap
     }
 }
