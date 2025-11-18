@@ -23,6 +23,18 @@ class ImageViewModel(private val imageRecordDao: ImageRecordDao) : ViewModel() {
     suspend fun getRecordById(id: Long): ImageRecord? {
         return imageRecordDao.getRecordById(id)
     }
+
+    suspend fun getRecordByUri(uri: String): ImageRecord? {
+        return imageRecordDao.getRecordByUri(uri)
+    }
+
+    fun delete(record: ImageRecord) = viewModelScope.launch {
+        imageRecordDao.delete(record)
+    }
+
+    fun clearAll() = viewModelScope.launch {
+        imageRecordDao.clearAll()
+    }
 }
 
 class ImageViewModelFactory(private val imageRecordDao: ImageRecordDao) : ViewModelProvider.Factory {

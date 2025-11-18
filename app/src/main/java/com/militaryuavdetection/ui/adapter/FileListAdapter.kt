@@ -67,28 +67,35 @@ class FileListAdapter(private var records: List<ImageRecord>, private var allRec
     override fun getItemCount() = records.size
 
     fun setViewMode(mode: ViewMode) {
-        viewMode = mode
-        notifyDataSetChanged()
+        if (viewMode != mode) {
+            viewMode = mode
+            notifyDataSetChanged()
+        }
     }
 
     fun updateSelection(newSelectedRecord: ImageRecord?) {
-        val oldSelectedPosition = records.indexOfFirst { it.id == selectedRecord?.id }
-        val newSelectedPosition = records.indexOfFirst { it.id == newSelectedRecord?.id }
+        val oldSelectedId = selectedRecord?.id
+        val newSelectedId = newSelectedRecord?.id
+
+        if (oldSelectedId == newSelectedId) return // No change
+
+        val oldPosition = records.indexOfFirst { it.id == oldSelectedId }
+        val newPosition = records.indexOfFirst { it.id == newSelectedId }
 
         selectedRecord = newSelectedRecord
 
-        if (oldSelectedPosition != -1) {
-            notifyItemChanged(oldSelectedPosition)
+        if (oldPosition != -1) {
+            notifyItemChanged(oldPosition)
         }
-        if (newSelectedPosition != -1) {
-            notifyItemChanged(newSelectedPosition)
+        if (newPosition != -1) {
+            notifyItemChanged(newPosition)
         }
     }
+
 
     fun updateData(newRecords: List<ImageRecord>) {
         allRecords = newRecords
         records = newRecords
-        // The selectedRecord is managed by MainActivity, just redraw everything
         notifyDataSetChanged()
     }
 
@@ -98,7 +105,6 @@ class FileListAdapter(private var records: List<ImageRecord>, private var allRec
         } else {
             allRecords.filter { it.name.contains(query, ignoreCase = true) }
         }
-        // The selectedRecord is managed by MainActivity, just redraw everything
         notifyDataSetChanged()
     }
 

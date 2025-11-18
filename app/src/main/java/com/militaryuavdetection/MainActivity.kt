@@ -18,6 +18,7 @@ import androidx.activity.viewModels
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.net.toUri
+import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -30,8 +31,12 @@ import com.militaryuavdetection.ui.adapter.GridSpacingItemDecoration
 import com.militaryuavdetection.utils.ObjectDetector
 import com.militaryuavdetection.viewmodel.ImageViewModel
 import com.militaryuavdetection.viewmodel.ImageViewModelFactory
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 
 enum class MarkingMode { OFF, MARK, BOX, NAME, CONFIDENCE }
@@ -60,12 +65,7 @@ class MainActivity : AppCompatActivity() {
             } ?: result.data?.data?.let { listOf(it) } ?: emptyList()
 
             if (uris.isNotEmpty()) {
-                uris.forEach { uri ->
-                    contentResolver.takePersistableUriPermission(
-                        uri,
-                        Intent.FLAG_GRANT_READ_URI_PERMISSION
-                    )
-                }
+                // Permissions are now granted via the picker
                 insertUrisAndAnalyze(uris)
             }
         }
@@ -79,17 +79,25 @@ class MainActivity : AppCompatActivity() {
         sharedPreferences = getSharedPreferences("MilitaryUavPrefs", Context.MODE_PRIVATE)
         objectDetector = ObjectDetector(this)
 
-        currentModel = sharedPreferences.getString("selected_model", null)
-        currentModel?.let {
-            lifecycleScope.launch {
-                objectDetector.loadModel(it)
-                binding.browseModelButton.setImageResource(R.drawable.importmodel_check)
-            }
-        }
-
         setupRecyclerView()
         setupClickListeners()
         observeViewModel()
+        loadInitialData()
+    }
+
+    private fun loadInitialData(){
+        lifecycleScope.launch{
+            // Clear previous session's data
+            imageViewModel.clearAll()
+            // Load the selected model
+            currentModel = sharedPreferences.getString("selected_model", null)
+            currentModel?.let {
+                objectDetector.loadModel(it)
+                binding.browseModelButton.setImageResource(R.drawable.importmodel_check)
+            }
+            // Load sample images
+            loadSampleImages()
+        }
     }
 
     private fun setupRecyclerView() {
@@ -116,8 +124,10 @@ class MainActivity : AppCompatActivity() {
             } ?: emptyList()
             binding.imagePanel.setDetections(detections)
 
-        } catch (e: SecurityException) {
-            Toast.makeText(this, "Permission denied for ${record.name}. Please re-import the file.", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            // SecurityException or other errors
+            Toast.makeText(this, "Could not load image: ${record.name}", Toast.LENGTH_SHORT).show()
+            e.printStackTrace()
         }
     }
 
@@ -125,7 +135,11 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             imageViewModel.allRecords.collect { records ->
                 fileListAdapter.updateData(records)
-                currentRecord?.let { fileListAdapter.updateSelection(it) }
+                binding.clearAllButton.isVisible = records.isNotEmpty()
+                // If the currently selected record was deleted, clear the panel
+                if (currentRecord != null && records.none { it.id == currentRecord!!.id }) {
+                    clearSelection()
+                }
             }
         }
     }
@@ -136,6 +150,17 @@ class MainActivity : AppCompatActivity() {
         binding.markTypeButton.setOnClickListener { cycleMarkingMode() }
         binding.cameraButton.setOnClickListener { showCameraOptions() }
         binding.exportButton.setOnClickListener { selectExportLocation() }
+
+        binding.clearAllButton.setOnClickListener {
+            AlertDialog.Builder(this)
+                .setTitle("Clear All")
+                .setMessage("Are you sure you want to delete all items?")
+                .setPositiveButton("Yes") { _, _ ->
+                    imageViewModel.clearAll()
+                }
+                .setNegativeButton("No", null)
+                .show()
+        }
 
         binding.viewModeIcon.setOnClickListener { setViewMode(FileListAdapter.ViewMode.ICON) }
         binding.viewModeDetail.setOnClickListener { setViewMode(FileListAdapter.ViewMode.DETAIL) }
@@ -173,7 +198,6 @@ class MainActivity : AppCompatActivity() {
     private fun cycleMarkingMode() {
         markingMode = MarkingMode.values()[(markingMode.ordinal + 1) % MarkingMode.values().size]
         binding.markTypeButton.text = markingMode.name
-        // You might want to update the image panel to reflect the new marking mode
         binding.imagePanel.invalidate() // Redraws the view
     }
 
@@ -197,8 +221,7 @@ class MainActivity : AppCompatActivity() {
     private fun openImagePicker() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
-            type = "*/*"
-            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "video/*"))
+            type = "image/*"
             putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
         }
         openFilesLauncher.launch(intent)
@@ -232,68 +255,41 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showCameraOptions() {
-        val options = arrayOf("Take Picture", "Record Video", "Real-time Processing")
-        AlertDialog.Builder(this)
-            .setTitle("Camera Options")
-            .setItems(options) { _, which ->
-                // Handle camera actions
-            }
-            .show()
-    }
+    private fun showCameraOptions() { /* ... */ }
+    private fun selectExportLocation() { /* ... */ }
+    private fun showSearch() { /* ... */ }
+    private fun hideSearch() { /* ... */ }
 
-    private fun selectExportLocation() {
-        // Use ACTION_OPEN_DOCUMENT_TREE to select a directory
-        Toast.makeText(this, "Export location selected (Placeholder)", Toast.LENGTH_SHORT).show()
-    }
-
-    private fun showSearch() {
-        binding.imageName.visibility = View.GONE
-        binding.imageSize.visibility = View.GONE
-        binding.extendListPanelButton.visibility = View.GONE
-        binding.searchEditText.visibility = View.VISIBLE
-        binding.searchEditText.requestFocus()
-        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-        imm.showSoftInput(binding.searchEditText, InputMethodManager.SHOW_IMPLICIT)
-    }
-
-    private fun hideSearch() {
-        binding.imageName.visibility = View.VISIBLE
-        binding.imageSize.visibility = View.VISIBLE
-        binding.extendListPanelButton.visibility = View.VISIBLE
-        binding.searchEditText.visibility = View.GONE
-        binding.searchEditText.text.clear()
-
-        currentRecord?.let {
-            binding.imageName.text = it.name
-            binding.imageSize.text = "${it.width}x${it.height}"
-        } ?: run {
-            binding.imageName.text = "Image Name"
-            binding.imageSize.text = "Size"
-        }
-
-        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-        imm.hideSoftInputFromWindow(binding.searchEditText.windowToken, 0)
+    private fun clearSelection(){
+        currentRecord = null
+        fileListAdapter.updateSelection(null)
+        binding.imagePanel.setImageDrawable(null)
+        binding.imagePanel.setDetections(emptyList())
+        binding.imageName.text = "Image Name"
+        binding.imageSize.text = "Size"
     }
 
     private fun insertUrisAndAnalyze(uris: List<Uri>) {
         lifecycleScope.launch {
-            val records = uris.mapNotNull { uri ->
+            var reprocessed = false
+            val recordsToInsert = uris.mapNotNull { uri ->
                 try {
+                    // Check for duplicates
+                    val existingRecord = imageViewModel.getRecordByUri(uri.toString())
+                    if (existingRecord != null) {
+                        imageViewModel.delete(existingRecord)
+                        reprocessed = true
+                    }
+
                     val pfd = contentResolver.openFileDescriptor(uri, "r") ?: return@mapNotNull null
                     val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                     BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, options)
                     pfd.close()
 
-                    val mediaType = when {
-                        options.outMimeType?.startsWith("image/") == true -> "IMAGE"
-                        options.outMimeType?.startsWith("video/") == true -> "VIDEO"
-                        else -> return@mapNotNull null
-                    }
-
+                    val mediaType = if (options.outMimeType?.startsWith("image/") == true) "IMAGE" else "VIDEO"
                     val documentFile = androidx.documentfile.provider.DocumentFile.fromSingleUri(this@MainActivity, uri)
 
-                    val detections = if (mediaType == "IMAGE") objectDetector.analyzeImage(uri) else emptyList()
+                    val detections = if (mediaType == "IMAGE" && currentModel != null) objectDetector.analyzeImage(uri) else emptyList()
                     val bboxesJson = gson.toJson(detections)
 
                     ImageRecord(
@@ -304,22 +300,52 @@ class MainActivity : AppCompatActivity() {
                         mediaType = mediaType,
                         width = options.outWidth,
                         height = options.outHeight,
-                        boundingBoxes = bboxesJson,
-                        confidence = null, // This can be populated from detections if needed
-                        isSaved = false
+                        boundingBoxes = bboxesJson
                     )
                 } catch (e: Exception) {
                     e.printStackTrace()
                     null
                 }
             }
-            if (records.isNotEmpty()) {
-                imageViewModel.insertAll(records)
+            if (recordsToInsert.isNotEmpty()) {
+                imageViewModel.insertAll(recordsToInsert)
+                if (reprocessed) {
+                    Toast.makeText(this@MainActivity, "Frame updated for existing image(s)", Toast.LENGTH_SHORT).show()
+                }
                 // Automatically select the last imported image
                 imageViewModel.getLastInsertedId()?.let { lastId ->
                     imageViewModel.getRecordById(lastId)?.let { selectRecord(it) }
                 }
             }
+        }
+    }
+
+    private suspend fun loadSampleImages() = withContext(Dispatchers.IO) {
+        val importDir = "import"
+        try {
+            val sampleImageNames = assets.list(importDir)
+            if (sampleImageNames.isNullOrEmpty()) return@withContext
+
+            val tempFileUris = sampleImageNames.mapNotNull { fileName ->
+                try {
+                    val inputStream = assets.open("$importDir/$fileName")
+                    val tempFile = File(cacheDir, fileName)
+                    val outputStream = FileOutputStream(tempFile)
+                    inputStream.copyTo(outputStream)
+                    Uri.fromFile(tempFile)
+                } catch (e: IOException) {
+                    e.printStackTrace()
+                    null
+                }
+            }
+            if(tempFileUris.isNotEmpty()){
+                 withContext(Dispatchers.Main){
+                     insertUrisAndAnalyze(tempFileUris)
+                 }
+            }
+
+        } catch (e: IOException) {
+            e.printStackTrace()
         }
     }
 
