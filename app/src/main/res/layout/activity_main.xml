@@ -21,7 +21,7 @@
         android:layout_width="0dp"
         android:layout_height="50dp"
         android:orientation="horizontal"
-        android:background="?android:attr/windowBackground"
+        android:background="#1a1a1e"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
@@ -42,7 +42,8 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Mark" />
+            android:text="Mark"
+            android:textColor="@android:color/white"/>
 
         <Button
             android:id="@+id/cameraButton"
@@ -50,7 +51,8 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Camera" />
+            android:text="Camera"
+            android:textColor="@android:color/white"/>
 
         <Button
             android:id="@+id/exportButton"
@@ -58,7 +60,8 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Export" />
+            android:text="Export"
+            android:textColor="@android:color/white"/>
 
         <ImageButton
             android:id="@+id/browseModelButton"
@@ -74,9 +77,10 @@
     <LinearLayout
         android:id="@+id/detailBar"
         android:layout_width="match_parent"
-        android:layout_height="50dp"
+        android:layout_height="60dp"
         android:orientation="horizontal"
         android:padding="8dp"
+        android:background="#1a1a1e"
         app:layout_constraintTop_toBottomOf="@+id/imagePanel"
         app:layout_constraintBottom_toTopOf="@+id/listPanel"
         app:layout_constraintStart_toStartOf="parent"
@@ -95,6 +99,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="Image Name"
+            android:textColor="@android:color/white"
             android:layout_marginStart="8dp"/>
 
         <TextView
@@ -102,6 +107,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Size"
+            android:textColor="@android:color/white"
             android:layout_marginStart="8dp"/>
 
         <ImageView
@@ -116,7 +122,7 @@
         android:layout_width="wrap_content"
         android:layout_height="0dp"
         android:orientation="vertical"
-        android:background="#1F1F1F"
+        android:background="#1a1a1e"
         android:padding="4dp"
         android:gravity="center_vertical"
         app:layout_constraintTop_toBottomOf="@+id/detailBar"
@@ -129,19 +135,28 @@
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            android:src="@android:drawable/ic_dialog_dialer"/>
+            android:src="@android:drawable/ic_dialog_dialer"
+            android:background="@android:color/transparent"
+            android:scaleType="fitCenter"
+            android:padding="6dp"/>
         <ImageButton
             android:id="@+id/view_mode_detail"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            android:src="@android:drawable/ic_menu_sort_by_size"/>
+            android:src="@android:drawable/ic_menu_sort_by_size"
+            android:background="@android:color/transparent"
+            android:scaleType="fitCenter"
+            android:padding="6dp"/>
         <ImageButton
             android:id="@+id/view_mode_content"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            android:src="@android:drawable/ic_menu_agenda"/>
+            android:src="@android:drawable/ic_menu_agenda"
+            android:background="@android:color/transparent"
+            android:scaleType="fitCenter"
+            android:padding="6dp"/>
 
     </LinearLayout>
 
@@ -159,7 +174,8 @@
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/recyclerView"
             android:layout_width="match_parent"
-            android:layout_height="match_parent" />
+            android:layout_height="match_parent"
+            android:background="#222327"/>
     </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>
