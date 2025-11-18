@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.PointF
 import android.graphics.Rect
 import android.graphics.RectF
 import android.util.AttributeSet
@@ -17,8 +18,10 @@ import com.militaryuavdetection.utils.ObjectDetector
 class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImageView(context, attrs) {
 
     private var scaleGestureDetector: ScaleGestureDetector
-    private val matrixValues = FloatArray(9)
+    private val imageMatrix = Matrix()
     private var scaleFactor = 1.0f
+    private var lastTouch = PointF()
+    private var isDragging = false
 
     private var detections: List<ObjectDetector.DetectionResult> = emptyList()
     private var markingMode: MarkingMode = MarkingMode.OFF
@@ -26,15 +29,14 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
     private var colorMap: Map<Int, Int> = emptyMap()
 
     private val boxPaint = Paint()
-    private val textPaint = Paint().apply {
-        textSize = 40.0f
-    }
+    private val textPaint = Paint().apply { textSize = 40.0f }
     private val backgroundPaint = Paint()
 
+    var onTransformChanged: (() -> Unit)? = null
+
     init {
+        super.setScaleType(ScaleType.MATRIX)
         scaleGestureDetector = ScaleGestureDetector(context, ScaleListener())
-        imageMatrix = Matrix()
-        scaleType = ScaleType.MATRIX
     }
 
     fun setDetections(
@@ -47,12 +49,38 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
         this.markingMode = markingMode
         this.instanceValues = instanceValues
         this.colorMap = colorMap
-        invalidate() // Redraw the view with the new detections
+        fitImage()
+        invalidate()
     }
+
+    fun fitImage() {
+        if (drawable == null || width == 0 || height == 0) return
+
+        val dWidth = drawable.intrinsicWidth.toFloat()
+        val dHeight = drawable.intrinsicHeight.toFloat()
+
+        val scale: Float
+        var dx = 0f
+        var dy = 0f
+
+        if (dWidth * height > width * dHeight) { // Image is wider
+            scale = width.toFloat() / dWidth
+            dy = (height - dHeight * scale) * 0.5f
+        } else { // Image is taller or square
+            scale = height.toFloat() / dHeight
+            dx = (width - dWidth * scale) * 0.5f
+        }
+
+        imageMatrix.setScale(scale, scale)
+        imageMatrix.postTranslate(dx, dy)
+        setImageMatrix(imageMatrix)
+        scaleFactor = scale
+        onTransformChanged?.invoke()
+    }
+
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-
         if (drawable == null || markingMode == MarkingMode.OFF) return
 
         val viewMatrix = imageMatrix
@@ -146,11 +174,11 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
         // Try position above the box
         if (box.top - backgroundHeight >= 0) {
             backgroundRect = RectF(box.left, box.top - backgroundHeight, box.left + backgroundWidth, box.top)
-        } 
+        }
         // Else, try position below the box
         else if (box.bottom + backgroundHeight <= height) {
              backgroundRect = RectF(box.left, box.bottom, box.left + backgroundWidth, box.bottom + backgroundHeight)
-        } 
+        }
         // Else, position inside top-left corner
         else {
             backgroundRect = RectF(box.left, box.top, box.left + backgroundWidth, box.top + backgroundHeight)
@@ -162,21 +190,40 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
         canvas.drawText(text, backgroundRect.left + padding, textY, textPaint)
     }
 
-
     override fun onTouchEvent(event: MotionEvent): Boolean {
         scaleGestureDetector.onTouchEvent(event)
+
+        when (event.action) {
+            MotionEvent.ACTION_DOWN -> {
+                lastTouch.set(event.x, event.y)
+                isDragging = true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (isDragging && !scaleGestureDetector.isInProgress) {
+                    val dx = event.x - lastTouch.x
+                    val dy = event.y - lastTouch.y
+                    imageMatrix.postTranslate(dx, dy)
+                    setImageMatrix(imageMatrix)
+                    lastTouch.set(event.x, event.y)
+                    onTransformChanged?.invoke()
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                isDragging = false
+            }
+        }
         return true
     }
 
     private inner class ScaleListener : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScale(detector: ScaleGestureDetector): Boolean {
-            scaleFactor *= detector.scaleFactor
-            scaleFactor = scaleFactor.coerceIn(1.0f, 5.0f)
-
-            val matrix = Matrix(imageMatrix)
-            matrix.postScale(detector.scaleFactor, detector.scaleFactor, detector.focusX, detector.focusY)
-            imageMatrix = matrix
-
+            val newScale = scaleFactor * detector.scaleFactor
+            if (newScale >= 1.0f) { // Prevent zooming out too much
+                scaleFactor = newScale
+                imageMatrix.postScale(detector.scaleFactor, detector.scaleFactor, detector.focusX, detector.focusY)
+                setImageMatrix(imageMatrix)
+                onTransformChanged?.invoke()
+            }
             return true
         }
     }

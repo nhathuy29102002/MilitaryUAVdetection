@@ -16,6 +16,19 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/fitImageButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_margin="16dp"
+        android:src="@android:drawable/ic_menu_zoom"
+        app:tint="@android:color/white"
+        app:backgroundTint="#4c4c52"
+        app:layout_constraintTop_toTopOf="@+id/imagePanel"
+        app:layout_constraintStart_toStartOf="@+id/imagePanel"
+        android:visibility="gone"
+        tools:visibility="visible"/>
+
     <LinearLayout
         android:id="@+id/taskbar"
         android:layout_width="0dp"
@@ -192,6 +205,7 @@
             android:layout_gravity="bottom|end"
             android:layout_margin="13dp"
             android:src="@android:drawable/ic_menu_close_clear_cancel"
+            app:backgroundTint="#da3e44"
             app:tint="@android:color/white"
             android:visibility="gone"
             tools:visibility="visible"/>

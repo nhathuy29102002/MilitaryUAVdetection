@@ -152,6 +152,7 @@ class MainActivity : AppCompatActivity() {
                 gson.fromJson(it, type)
             } ?: emptyList()
             binding.imagePanel.setDetections(detections, markingMode, instanceValues, colorMap)
+            binding.fitImageButton.visibility = View.GONE
 
         } catch (e: Exception) {
             Toast.makeText(this, "Could not load image: ${record.name}", Toast.LENGTH_SHORT).show()
@@ -177,6 +178,15 @@ class MainActivity : AppCompatActivity() {
         binding.markTypeButton.setOnClickListener { cycleMarkingMode() }
         binding.cameraButton.setOnClickListener { showCameraOptions() }
         binding.exportButton.setOnClickListener { selectExportLocation() }
+
+        binding.fitImageButton.setOnClickListener {
+            binding.imagePanel.fitImage()
+            binding.fitImageButton.visibility = View.GONE
+        }
+
+        binding.imagePanel.onTransformChanged = {
+            binding.fitImageButton.visibility = View.VISIBLE
+        }
 
         binding.clearAllButton.setOnClickListener {
             AlertDialog.Builder(this)
