@@ -1,206 +1,251 @@
 package com.militaryuavdetection
 
-import android.Manifest
+import android.app.Activity
+import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
+import android.content.SharedPreferences
+import android.graphics.BitmapFactory
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
-import android.util.Log
 import android.view.View
-import android.widget.PopupMenu
+import android.widget.EditText
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.bumptech.glide.Glide
+import com.militaryuavdetection.database.ImageRecord
 import com.militaryuavdetection.databinding.ActivityMainBinding
-import com.militaryuavdetection.objectdetector.CameraActivity
 import com.militaryuavdetection.ui.adapter.FileListAdapter
-import com.militaryuavdetection.viewmodel.MainViewModel
+import com.militaryuavdetection.viewmodel.ImageViewModel
+import com.militaryuavdetection.viewmodel.ImageViewModelFactory
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
-    private val viewModel: MainViewModel by viewModels()
-
     private lateinit var fileListAdapter: FileListAdapter
+    private var currentModel: String? = null
+    private var isListPanelExtended = false
+    private lateinit var sharedPreferences: SharedPreferences
 
-    private val permissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
-            val allGranted = permissions.entries.all { it.value }
-            if (allGranted) {
-                Toast.makeText(this, "Đã cấp quyền", Toast.LENGTH_SHORT).show()
-            } else {
-                Toast.makeText(this, "Ứng dụng cần quyền Camera và Bộ nhớ", Toast.LENGTH_LONG).show()
-            }
-        }
+    private val imageViewModel: ImageViewModel by viewModels {
+        ImageViewModelFactory((application as MilitaryUavApplication).database.imageRecordDao())
+    }
 
-    private val browseDirectoryLauncher =
-        registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
-            uri?.let {
-                Log.d("MainActivity", "Thư mục đã chọn: $it")
-                try {
-                    contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    viewModel.loadDirectory(it)
-                } catch (e: SecurityException) {
-                    Log.e("MainActivity", "Lỗi cấp quyền thư mục", e)
+    private val openFilesLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val uris = result.data?.clipData?.let {
+                clipData -> (0 until clipData.itemCount).map { clipData.getItemAt(it).uri }
+            } ?: result.data?.data?.let { listOf(it) } ?: emptyList()
+
+            if (uris.isNotEmpty()) {
+                insertUrisAsRecords(uris)
+                lifecycleScope.launch{
+                    imageViewModel.getLastInsertedId()?.let { lastId ->
+                        imageViewModel.getRecordById(lastId)?.let { selectRecord(it) }
+                    }
                 }
             }
         }
+    }
+
+    private val openModelLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            result.data?.data?.let {
+                currentModel = it.path
+                sharedPreferences.edit().putString("selected_model", currentModel).apply()
+                binding.browseModelButton.setImageResource(R.drawable.importmodel_check)
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        requestPermissions()
+        sharedPreferences = getSharedPreferences("MilitaryUavPrefs", Context.MODE_PRIVATE)
+        currentModel = sharedPreferences.getString("selected_model", null)
+        if (currentModel != null) {
+            binding.browseModelButton.setImageResource(R.drawable.importmodel_check)
+        }
+
         setupRecyclerView()
         setupClickListeners()
         observeViewModel()
     }
 
-    private fun requestPermissions() {
-        val permissionsToRequest = mutableListOf<String>()
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-            permissionsToRequest.add(Manifest.permission.CAMERA)
-        }
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            permissionsToRequest.add(Manifest.permission.RECORD_AUDIO)
-        }
-
-        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(Manifest.permission.READ_EXTERNAL_STORAGE)
-            }
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-            }
-        } else {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(Manifest.permission.READ_MEDIA_IMAGES)
-            }
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(Manifest.permission.READ_MEDIA_VIDEO)
-            }
-        }
-
-        if (permissionsToRequest.isNotEmpty()) {
-            permissionLauncher.launch(permissionsToRequest.toTypedArray())
-        }
-    }
-
     private fun setupRecyclerView() {
-        fileListAdapter = FileListAdapter { fileItem ->
-            viewModel.onFileSelected(fileItem)
-        }
+        fileListAdapter = FileListAdapter(emptyList())
+        binding.recyclerView.adapter = fileListAdapter
+        setViewMode(FileListAdapter.ViewMode.ICON)
 
-        binding.recyclerViewFiles.apply {
-            adapter = fileListAdapter
-            layoutManager = GridLayoutManager(this@MainActivity, 4)
+        fileListAdapter.onItemClick = { record ->
+            selectRecord(record)
         }
-        fileListAdapter.setViewType(FileListAdapter.VIEW_TYPE_ICON)
     }
 
-    private fun setupClickListeners() {
-        binding.btnBrowseImage.setOnClickListener {
-            browseDirectoryLauncher.launch(null)
-        }
-
-        binding.btnMarkType.setOnClickListener {
-            viewModel.cycleMarkType()
-        }
-
-        binding.btnCameraActions.setOnClickListener { view ->
-            val popup = PopupMenu(this, view)
-            popup.menuInflater.inflate(R.menu.camera_options_menu, popup.menu)
-            popup.setOnMenuItemClickListener { item ->
-                when (item.itemId) {
-                    R.id.option_take_photo -> {
-                        val intent = Intent(this, CameraActivity::class.java).apply {
-                            putExtra("CAPTURE_MODE", "PHOTO")
-                        }
-                        startActivity(intent)
-                        true
-                    }
-                    R.id.option_record_video -> {
-                        val intent = Intent(this, CameraActivity::class.java).apply {
-                            putExtra("CAPTURE_MODE", "VIDEO")
-                        }
-                        startActivity(intent)
-                        true
-                    }
-                    R.id.option_realtime -> {
-                        val intent = Intent(this, CameraActivity::class.java).apply {
-                            putExtra("CAPTURE_MODE", "REALTIME")
-                        }
-                        startActivity(intent)
-                        true
-                    }
-                    else -> false
-                }
-            }
-            popup.show()
-        }
-
-        binding.btnExportLocation.setOnClickListener {
-        }
-
-        binding.btnBrowseModel.setOnClickListener {
-            Toast.makeText(this, "Model được tự động tải từ assets", Toast.LENGTH_SHORT).show()
-        }
-
-        binding.btnViewIcon.setOnClickListener {
-            fileListAdapter.setViewType(FileListAdapter.VIEW_TYPE_ICON)
-            binding.recyclerViewFiles.layoutManager = GridLayoutManager(this, 4)
-        }
-
-        binding.btnViewDetail.setOnClickListener {
-            fileListAdapter.setViewType(FileListAdapter.VIEW_TYPE_DETAIL)
-            binding.recyclerViewFiles.layoutManager = LinearLayoutManager(this)
-        }
-
-        binding.btnViewContent.setOnClickListener {
-            fileListAdapter.setViewType(FileListAdapter.VIEW_TYPE_CONTENT)
-            binding.recyclerViewFiles.layoutManager = LinearLayoutManager(this)
-        }
+    private fun selectRecord(record: ImageRecord){
+        binding.imagePanel.setImageURI(record.uri.toUri())
+        binding.imageName.text = record.name
+        binding.imageSize.text = "${record.width}x${record.height}"
     }
 
     private fun observeViewModel() {
-        viewModel.fileList.observe(this) { fileList ->
-            fileListAdapter.submitList(fileList)
-            binding.imagePanelPlaceholder.visibility = if (fileList.isEmpty() && viewModel.selectedFile.value == null) View.VISIBLE else View.GONE
-        }
-
-        viewModel.isModelLoaded.observe(this) { isLoaded ->
-            if (isLoaded) {
-                binding.btnBrowseModel.setImageResource(R.drawable.importmodel_check)
-                binding.btnBrowseModel.setColorFilter(ContextCompat.getColor(this, android.R.color.holo_green_light))
-            } else {
-                binding.btnBrowseModel.setImageResource(R.drawable.ic_launcher_background)
-                binding.btnBrowseModel.clearColorFilter()
+        lifecycleScope.launch {
+            imageViewModel.allRecords.collect { records ->
+                fileListAdapter.updateData(records)
             }
         }
+    }
 
-        viewModel.markType.observe(this) { markType ->
+    private fun setupClickListeners() {
+        binding.browseImageButton.setOnClickListener { showImageImportOptions() }
+        binding.browseModelButton.setOnClickListener { openModelPicker() }
+        binding.markTypeButton.setOnClickListener { showMarkingOptions() }
+        binding.cameraButton.setOnClickListener { showCameraOptions() }
+        binding.exportButton.setOnClickListener { selectExportLocation() }
+
+        binding.viewModeIcon.setOnClickListener { setViewMode(FileListAdapter.ViewMode.ICON) }
+        binding.viewModeDetail.setOnClickListener { setViewMode(FileListAdapter.ViewMode.DETAIL) }
+        binding.viewModeContent.setOnClickListener { setViewMode(FileListAdapter.ViewMode.CONTENT) }
+
+        binding.extendListPanelButton.setOnClickListener { toggleListPanelExtension() }
+        binding.searchIcon.setOnClickListener { showSearch() }
+    }
+
+    private fun toggleListPanelExtension() {
+        isListPanelExtended = !isListPanelExtended
+        if (isListPanelExtended) {
+            binding.imagePanel.visibility = View.GONE
+            binding.taskbar.visibility = View.GONE
+            binding.viewModeButtons.visibility = View.GONE
+            binding.detailBar.visibility = View.VISIBLE
+            binding.extendListPanelButton.setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
+        } else {
+            binding.imagePanel.visibility = View.VISIBLE
+            binding.taskbar.visibility = View.VISIBLE
+            binding.viewModeButtons.visibility = View.VISIBLE
+            binding.extendListPanelButton.setImageResource(R.drawable.screenshot)
         }
+    }
 
-        viewModel.selectedFile.observe(this) { fileItem ->
-            if (fileItem != null) {
-                binding.imagePanelPlaceholder.visibility = View.GONE
-
-                Glide.with(this)
-                    .load(fileItem.uri)
-                    .into(binding.zoomableImageView)
-
-                binding.textDetailBar.text = "Tên: ${fileItem.name} - Kích thước: ${fileItem.size / 1024} KB"
-            } else {
-                binding.imagePanelPlaceholder.visibility = View.VISIBLE
-                binding.zoomableImageView.setImageResource(0)
+    private fun showImageImportOptions(){
+        val options = arrayOf("Import Files", "Import Folder")
+        AlertDialog.Builder(this)
+            .setTitle("Import Media")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> {
+                        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = "*/*"
+                            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "video/*"))
+                            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                        }
+                        openFilesLauncher.launch(intent)
+                    }
+                    1 -> { /* Logic for folder import - requires ACTION_OPEN_DOCUMENT_TREE */ }
+                }
             }
+            .show()
+    }
+
+    private fun openModelPicker() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*" // Should be application/octet-stream for .onnx, but * a safer bet
+        }
+        openModelLauncher.launch(intent)
+    }
+
+    private fun showMarkingOptions() {
+        val options = arrayOf("No Bounding Box", "Bounding Box", "Box + Instance", "Box + Confidence")
+        AlertDialog.Builder(this)
+            .setTitle("Select Marking Type")
+            .setItems(options) { _, which ->
+                // Handle selection
+            }
+            .show()
+    }
+
+    private fun showCameraOptions() {
+        val options = arrayOf("Take Picture", "Record Video", "Real-time Processing")
+        AlertDialog.Builder(this)
+            .setTitle("Camera Options")
+            .setItems(options) { _, which ->
+                // Handle camera actions
+            }
+            .show()
+    }
+
+    private fun selectExportLocation() {
+        // Use ACTION_OPEN_DOCUMENT_TREE to select a directory
+        Toast.makeText(this, "Export location selected (Placeholder)", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun showSearch() {
+        val searchEditText = EditText(this)
+        AlertDialog.Builder(this)
+            .setTitle("Search")
+            .setView(searchEditText)
+            .setPositiveButton("Search") { _, _ ->
+                val query = searchEditText.text.toString()
+                // Perform search on the ViewModel
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun insertUrisAsRecords(uris: List<Uri>) {
+        val records = uris.mapNotNull { uri ->
+            try {
+                val pfd = contentResolver.openFileDescriptor(uri, "r") ?: return@mapNotNull null
+                val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, options)
+                pfd.close()
+
+                val mediaType = when {
+                    options.outMimeType?.startsWith("image/") == true -> "IMAGE"
+                    options.outMimeType?.startsWith("video/") == true -> "VIDEO"
+                    else -> return@mapNotNull null
+                }
+                
+                val documentFile = androidx.documentfile.provider.DocumentFile.fromSingleUri(this, uri)
+
+                ImageRecord(
+                    uri = uri.toString(),
+                    name = documentFile?.name ?: "Unknown",
+                    dateModified = documentFile?.lastModified() ?: 0,
+                    size = documentFile?.length() ?: 0,
+                    mediaType = mediaType,
+                    width = options.outWidth,
+                    height = options.outHeight,
+                    boundingBoxes = null,
+                    confidence = null,
+                    isSaved = false
+                )
+            } catch (e: Exception) {
+                e.printStackTrace()
+                null
+            }
+        }
+        if (records.isNotEmpty()) {
+            imageViewModel.insertAll(records)
+        }
+    }
+
+    private fun setViewMode(viewMode: FileListAdapter.ViewMode) {
+        fileListAdapter.setViewMode(viewMode)
+        binding.recyclerView.layoutManager = when (viewMode) {
+            FileListAdapter.ViewMode.ICON -> GridLayoutManager(this, 4)
+            FileListAdapter.ViewMode.DETAIL, FileListAdapter.ViewMode.CONTENT -> LinearLayoutManager(this)
         }
     }
 }

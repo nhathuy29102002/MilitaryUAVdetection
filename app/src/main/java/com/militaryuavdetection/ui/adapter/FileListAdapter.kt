@@ -1,113 +1,104 @@
 package com.militaryuavdetection.ui.adapter
 
 import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewGroup
-import androidx.recyclerview.widget.DiffUtil
-import androidx.recyclerview.widget.ListAdapter
+import android.widget.ImageView
+import android.widget.TextView
+import androidx.core.net.toUri
 import androidx.recyclerview.widget.RecyclerView
 import com.militaryuavdetection.R
-import com.militaryuavdetection.data.FileItem
-import com.militaryuavdetection.databinding.ListItemIconBinding
-import com.militaryuavdetection.databinding.ListItemContentBinding
-import com.militaryuavdetection.databinding.ListItemDetailBinding
+import com.militaryuavdetection.database.ImageRecord
+import java.text.SimpleDateFormat
+import java.util.*
 
-class FileListAdapter(
-    private val onClick: (FileItem) -> Unit
-) : ListAdapter<FileItem, RecyclerView.ViewHolder>(FileDiffCallback) {
+class FileListAdapter(private var records: List<ImageRecord>) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
-    companion object {
-        const val VIEW_TYPE_ICON = 1
-        const val VIEW_TYPE_DETAIL = 2
-        const val VIEW_TYPE_CONTENT = 3
-    }
+    var onItemClick: ((ImageRecord) -> Unit)? = null
+    private var viewMode = ViewMode.ICON
 
-    private var currentViewType = VIEW_TYPE_ICON
-
-    fun setViewType(viewType: Int) {
-        currentViewType = viewType
-        notifyDataSetChanged()
+    enum class ViewMode {
+        ICON, DETAIL, CONTENT
     }
 
     override fun getItemViewType(position: Int): Int {
-        return currentViewType
+        return viewMode.ordinal
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
         val inflater = LayoutInflater.from(parent.context)
-        return when (viewType) {
-            VIEW_TYPE_ICON -> IconViewHolder(ListItemIconBinding.inflate(inflater, parent, false), onClick)
-            VIEW_TYPE_DETAIL -> DetailViewHolder(ListItemDetailBinding.inflate(inflater, parent, false), onClick)
-            VIEW_TYPE_CONTENT -> ContentViewHolder(ListItemContentBinding.inflate(inflater, parent, false), onClick)
-            else -> throw IllegalArgumentException("Invalid view type")
+        return when (ViewMode.values()[viewType]) {
+            ViewMode.ICON -> {
+                val view = inflater.inflate(R.layout.item_icon_layout, parent, false)
+                IconViewHolder(view)
+            }
+            ViewMode.DETAIL -> {
+                val view = inflater.inflate(R.layout.item_detail_layout, parent, false)
+                DetailViewHolder(view)
+            }
+            ViewMode.CONTENT -> {
+                val view = inflater.inflate(R.layout.item_content_layout, parent, false)
+                ContentViewHolder(view)
+            }
         }
     }
 
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
-        val item = getItem(position)
+        val record = records[position]
         when (holder) {
-            is IconViewHolder -> holder.bind(item)
-            is DetailViewHolder -> holder.bind(item)
-            is ContentViewHolder -> holder.bind(item)
+            is IconViewHolder -> holder.bind(record)
+            is DetailViewHolder -> holder.bind(record)
+            is ContentViewHolder -> holder.bind(record)
+        }
+        holder.itemView.setOnClickListener {
+            onItemClick?.invoke(record)
         }
     }
 
-    class IconViewHolder(private val binding: ListItemIconBinding, val onClick: (FileItem) -> Unit) :
-        RecyclerView.ViewHolder(binding.root) {
-        private var currentItem: FileItem? = null
+    override fun getItemCount() = records.size
 
-        init {
-            itemView.setOnClickListener { currentItem?.let { onClick(it) } }
-        }
+    fun setViewMode(mode: ViewMode) {
+        viewMode = mode
+        notifyDataSetChanged()
+    }
 
-        fun bind(item: FileItem) {
-            currentItem = item
-            val iconRes = if (item.isVideo) R.drawable.video_icon else R.drawable.ic_launcher_background
-            binding.itemImage.setImageResource(iconRes)
+    fun updateData(newRecords: List<ImageRecord>) {
+        records = newRecords
+        notifyDataSetChanged()
+    }
+
+    inner class IconViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        private val imageView: ImageView = itemView.findViewById(R.id.item_image)
+        fun bind(record: ImageRecord) {
+            imageView.setImageURI(record.uri.toUri())
         }
     }
 
-    class DetailViewHolder(private val binding: ListItemDetailBinding, val onClick: (FileItem) -> Unit) :
-        RecyclerView.ViewHolder(binding.root) {
-        private var currentItem: FileItem? = null
+    inner class DetailViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        private val iconView: ImageView = itemView.findViewById(R.id.item_icon)
+        private val nameView: TextView = itemView.findViewById(R.id.item_name)
+        private val dateView: TextView = itemView.findViewById(R.id.item_date)
+        private val sizeView: TextView = itemView.findViewById(R.id.item_size)
 
-        init {
-            itemView.setOnClickListener { currentItem?.let { onClick(it) } }
-        }
-
-        fun bind(item: FileItem) {
-            currentItem = item
-            binding.itemName.text = item.name
-            binding.itemDate.text = android.text.format.DateFormat.format("dd/MM/yy", item.date)
-
-            val iconRes = if (item.isVideo) R.drawable.video_icon else R.drawable.ic_launcher_background
-            binding.itemIcon.setImageResource(iconRes)
+        fun bind(record: ImageRecord) {
+            val icon = if (record.mediaType == "VIDEO") R.drawable.importvideo else R.drawable.importimage
+            iconView.setImageResource(icon)
+            nameView.text = record.name
+            dateView.text = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(record.dateModified))
+            sizeView.text = "${record.width}x${record.height}"
         }
     }
 
-    class ContentViewHolder(private val binding: ListItemContentBinding, val onClick: (FileItem) -> Unit) :
-        RecyclerView.ViewHolder(binding.root) {
-        private var currentItem: FileItem? = null
+    inner class ContentViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        private val imageView: ImageView = itemView.findViewById(R.id.item_image)
+        private val nameView: TextView = itemView.findViewById(R.id.item_name)
+        private val detailsView: TextView = itemView.findViewById(R.id.item_details)
 
-        init {
-            itemView.setOnClickListener { currentItem?.let { onClick(it) } }
+        fun bind(record: ImageRecord) {
+            imageView.setImageURI(record.uri.toUri())
+            nameView.text = record.name
+            val date = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(record.dateModified))
+            detailsView.text = "$date - ${record.width}x${record.height}"
         }
-
-        fun bind(item: FileItem) {
-            currentItem = item
-            binding.itemName.text = item.name
-            binding.itemDetails.text = "Ngày: ${android.text.format.DateFormat.format("dd/MM/yy", item.date)} - Kích thước: ${item.size / 1024} KB"
-            val iconRes = if (item.isVideo) R.drawable.video_icon else R.drawable.ic_launcher_background
-            binding.itemImage.setImageResource(iconRes)
-        }
-    }
-}
-
-object FileDiffCallback : DiffUtil.ItemCallback<FileItem>() {
-    override fun areItemsTheSame(oldItem: FileItem, newItem: FileItem): Boolean {
-        return oldItem.id == newItem.id
-    }
-
-    override fun areContentsTheSame(oldItem: FileItem, newItem: FileItem): Boolean {
-        return oldItem == newItem
     }
 }

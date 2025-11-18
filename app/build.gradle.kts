@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    id("kotlin-kapt")
 }
 
 android {
@@ -58,20 +59,28 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso.core)
 
 
-    // 1. CameraX (Thay thế mss, cv2.VideoCapture)
+    // 1. CameraX
     val cameraxVersion = "1.3.3"
     implementation("androidx.camera:camera-core:$cameraxVersion")
     implementation("androidx.camera:camera-camera2:$cameraxVersion")
     implementation("androidx.camera:camera-lifecycle:$cameraxVersion")
     implementation("androidx.camera:camera-view:$cameraxVersion")
 
-    // 2. ONNX Runtime (Thay thế ultralytics.YOLO)
+    // 2. ONNX Runtime
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.18.0")
+    
+    // 3. Glide
     implementation("com.github.bumptech.glide:glide:4.16.0")
+    kapt("com.github.bumptech.glide:compiler:4.16.0")
 
-
-    // 3. Kotlin Coroutines (Thay thế QRunnable, QThreadPool)
+    // 4. Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.1")
     implementation("androidx.fragment:fragment-ktx:1.7.0")
+
+    // 5. Room Database
+    val room_version = "2.6.1"
+    implementation("androidx.room:room-runtime:$room_version")
+    implementation("androidx.room:room-ktx:$room_version")
+    kapt("androidx.room:room-compiler:$room_version")
 }

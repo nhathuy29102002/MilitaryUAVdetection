@@ -4,218 +4,162 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#333333"
     tools:context=".MainActivity">
 
-    <!-- 1. IMAGE PANEL (Không đổi) -->
-    <FrameLayout
-        android:id="@+id/image_panel"
+    <com.militaryuavdetection.ui.view.ZoomableImageView
+        android:id="@+id/imagePanel"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:background="#E0E0E0"
+        android:background="#2C2C2C"
         app:layout_constraintDimensionRatio="1:1"
-        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent">
-        <!-- ... (Nội dung ZoomableImageView, BoundingBoxOverlay, v.v. như cũ) ... -->
-        <com.example.militaryuavdetection.ZoomableImageView
-            android:id="@+id/zoomable_image_view"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent" />
+        app:layout_constraintEnd_toEndOf="parent" />
 
-        <com.militaryuavdetection.ui.view.BoundingBoxOverlay
-            android:id="@+id/bbox_overlay"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent" />
-
-        <TextView
-            android:id="@+id/image_panel_placeholder"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:text="Chưa chọn ảnh/video"
-            android:textColor="#888888"
-            android:textSize="18sp" />
-    </FrameLayout>
-
-    <!-- 3. TASKBAR (Không đổi) -->
     <LinearLayout
         android:id="@+id/taskbar"
         android:layout_width="0dp"
-        android:layout_height="60dp"
-        android:background="#222222"
-        android:gravity="center_vertical"
+        android:layout_height="50dp"
         android:orientation="horizontal"
-        android:paddingTop="4dp"
-        android:paddingBottom="4dp"
+        android:background="?android:attr/windowBackground"
         app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent">
-        <!-- ... (Các ImageButton như cũ) ... -->
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
         <ImageButton
-            android:id="@+id/btn_browse_image"
+            android:id="@+id/browseImageButton"
+            style="?android:attr/buttonBarButtonStyle"
             android:layout_width="0dp"
-            android:layout_height="match_parent"
+            android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Browse Image"
             android:src="@drawable/importimage"
             android:scaleType="fitCenter"
-            app:tint="@android:color/white" />
+            android:contentDescription="Browse Media"/>
 
-        <ImageButton
-            android:id="@+id/btn_mark_type"
+        <Button
+            android:id="@+id/markTypeButton"
+            style="?android:attr/buttonBarButtonStyle"
             android:layout_width="0dp"
-            android:layout_height="match_parent"
+            android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Mark Type"
-            android:src="@android:drawable/ic_menu_crop"
-            app:tint="@android:color/white" />
+            android:text="Mark" />
 
-        <ImageButton
-            android:id="@+id/btn_camera_actions"
+        <Button
+            android:id="@+id/cameraButton"
+            style="?android:attr/buttonBarButtonStyle"
             android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1.2"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Camera Actions"
-            android:src="@android:drawable/ic_menu_camera"
-            app:tint="@android:color/holo_red_light" />
-
-        <ImageButton
-            android:id="@+id/btn_export_location"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
+            android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Export Location"
-            android:src="@android:drawable/ic_menu_save"
-            app:tint="@android:color/white" />
+            android:text="Camera" />
+
+        <Button
+            android:id="@+id/exportButton"
+            style="?android:attr/buttonBarButtonStyle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Export" />
 
         <ImageButton
-            android:id="@+id/btn_browse_model"
+            android:id="@+id/browseModelButton"
+            style="?android:attr/buttonBarButtonStyle"
             android:layout_width="0dp"
-            android:layout_height="match_parent"
+            android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Browse Model"
             android:src="@drawable/importmodel"
             android:scaleType="fitCenter"
-            app:tint="@android:color/white" />
+            android:contentDescription="Browse Model"/>
     </LinearLayout>
 
-    <!-- 2. LIST PANEL (ĐÃ SỬA LAYOUT THEO YÊU CẦU) -->
-    <androidx.constraintlayout.widget.ConstraintLayout
-        android:id="@+id/list_panel"
+    <LinearLayout
+        android:id="@+id/detailBar"
+        android:layout_width="match_parent"
+        android:layout_height="50dp"
+        android:orientation="horizontal"
+        android:padding="8dp"
+        app:layout_constraintTop_toBottomOf="@+id/imagePanel"
+        app:layout_constraintBottom_toTopOf="@+id/listPanel"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+
+        <ImageView
+            android:id="@+id/searchIcon"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:src="@android:drawable/ic_menu_search" />
+
+        <TextView
+            android:id="@+id/imageName"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Image Name"
+            android:layout_marginStart="8dp"/>
+
+        <TextView
+            android:id="@+id/imageSize"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Size"
+            android:layout_marginStart="8dp"/>
+
+        <ImageView
+            android:id="@+id/extendListPanelButton"
+            android:layout_width="40dp"
+            android:layout_height="wrap_content"
+            android:src="@drawable/screenshot" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/view_mode_buttons"
+        android:layout_width="wrap_content"
+        android:layout_height="0dp"
+        android:orientation="vertical"
+        android:background="#1F1F1F"
+        android:padding="4dp"
+        android:gravity="center_vertical"
+        app:layout_constraintTop_toBottomOf="@+id/detailBar"
+        app:layout_constraintBottom_toTopOf="@+id/taskbar"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toStartOf="@id/listPanel">
+
+        <ImageButton
+            android:id="@+id/view_mode_icon"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:src="@android:drawable/ic_dialog_dialer"/>
+        <ImageButton
+            android:id="@+id/view_mode_detail"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:src="@android:drawable/ic_menu_sort_by_size"/>
+        <ImageButton
+            android:id="@+id/view_mode_content"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:src="@android:drawable/ic_menu_agenda"/>
+
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/listPanel"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:background="#555555"
+        android:orientation="vertical"
+        app:layout_constraintTop_toBottomOf="@+id/detailBar"
         app:layout_constraintBottom_toTopOf="@+id/taskbar"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/image_panel">
+        app:layout_constraintStart_toEndOf="@id/view_mode_buttons"
+        app:layout_constraintEnd_toEndOf="parent">
 
-        <!-- DetailBar (Không đổi) -->
-        <FrameLayout
-            android:id="@+id/detail_bar_container"
-            android:layout_width="0dp"
-            android:layout_height="48dp"
-            android:background="#666666"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toTopOf="parent">
-            <!-- ... (Nội dung DetailBar như cũ) ... -->
-            <RelativeLayout
-                android:id="@+id/detail_bar_layout"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent">
-                <!-- ... (Các nút search, text, expand như cũ) ... -->
-                <ImageButton
-                    android:id="@+id/btn_search"
-                    android:layout_width="wrap_content"
-                    android:layout_height="match_parent"
-                    android:layout_alignParentStart="true"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:src="@android:drawable/ic_menu_search" />
 
-                <TextView
-                    android:id="@+id/text_detail_bar"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_centerVertical="true"
-                    android:layout_toStartOf="@+id/btn_expand_list"
-                    android:layout_toEndOf="@+id/btn_search"
-                    android:paddingStart="8dp"
-                    android:paddingEnd="8dp"
-                    android:text="Tên ảnh: N/A - Kích thước: N/A"
-                    android:textColor="@android:color/white" />
-
-                <ImageButton
-                    android:id="@+id/btn_expand_list"
-                    android:layout_width="wrap_content"
-                    android:layout_height="match_parent"
-                    android:layout_alignParentEnd="true"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:src="@android:drawable/ic_input_add" />
-            </RelativeLayout>
-            <EditText
-                android:id="@+id/search_bar"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:hint="Tìm kiếm..."
-                android:visibility="gone" />
-        </FrameLayout>
-
-        <!-- (THAY ĐỔI) Thanh View Mode (Bên trái) -->
-        <LinearLayout
-            android:id="@+id/view_mode_bar"
-            android:layout_width="48dp"
-            android:layout_height="0dp"
-            android:background="#444444"
-            android:gravity="top|center_horizontal"
-            android:orientation="vertical"
-            android:paddingTop="8dp"
-            app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@+id/detail_bar_container">
-
-            <ImageButton
-                android:id="@+id/btn_view_icon"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:background="?attr/selectableItemBackground"
-                android:src="@android:drawable/ic_dialog_dialer"
-                app:tint="@android:color/white" />
-
-            <ImageButton
-                android:id="@+id/btn_view_detail"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:background="?attr/selectableItemBackground"
-                android:src="@android:drawable/ic_menu_view"
-                app:tint="@android:color/white" />
-
-            <ImageButton
-                android:id="@+id/btn_view_content"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:background="?attr/selectableItemBackground"
-                android:src="@android:drawable/ic_menu_agenda"
-                app:tint="@android:color/white" />
-        </LinearLayout>
-
-        <!-- (THAY ĐỔI) Danh sách file (RecyclerView) -->
         <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/recycler_view_files"
-            android:layout_width="0dp"
-            android:layout_height="0dp"
-            app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintStart_toEndOf="@+id/view_mode_bar"
-            app:layout_constraintTop_toBottomOf="@+id/detail_bar_container"
-            tools:listitem="@layout/list_item_icon" />
-
-    </androidx.constraintlayout.widget.ConstraintLayout>
+            android:id="@+id/recyclerView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+    </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>
