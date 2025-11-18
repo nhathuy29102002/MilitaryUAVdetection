@@ -12,7 +12,7 @@ import com.militaryuavdetection.database.ImageRecord
 import java.text.SimpleDateFormat
 import java.util.*
 
-class FileListAdapter(private var records: List<ImageRecord>) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
+class FileListAdapter(private var records: List<ImageRecord>, private var allRecords: List<ImageRecord>) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     var onItemClick: ((ImageRecord) -> Unit)? = null
     private var viewMode = ViewMode.ICON
@@ -63,14 +63,28 @@ class FileListAdapter(private var records: List<ImageRecord>) : RecyclerView.Ada
     }
 
     fun updateData(newRecords: List<ImageRecord>) {
+        allRecords = newRecords
         records = newRecords
+        notifyDataSetChanged()
+    }
+
+    fun filter(query: String) {
+        records = if (query.isEmpty()) {
+            allRecords
+        } else {
+            allRecords.filter { it.name.contains(query, ignoreCase = true) }
+        }
         notifyDataSetChanged()
     }
 
     inner class IconViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         private val imageView: ImageView = itemView.findViewById(R.id.item_image)
         fun bind(record: ImageRecord) {
-            imageView.setImageURI(record.uri.toUri())
+            try {
+                imageView.setImageURI(record.uri.toUri())
+            } catch (e: SecurityException) {
+                imageView.setImageResource(R.drawable.ic_launcher_background) // Example placeholder
+            }
         }
     }
 
@@ -81,7 +95,7 @@ class FileListAdapter(private var records: List<ImageRecord>) : RecyclerView.Ada
         private val sizeView: TextView = itemView.findViewById(R.id.item_size)
 
         fun bind(record: ImageRecord) {
-            val icon = if (record.mediaType == "VIDEO") R.drawable.importvideo else R.drawable.importimage
+            val icon = if (record.mediaType == "VIDEO") R.drawable.video_icon else R.drawable.image_icon
             iconView.setImageResource(icon)
             nameView.text = record.name
             dateView.text = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(record.dateModified))
@@ -95,7 +109,11 @@ class FileListAdapter(private var records: List<ImageRecord>) : RecyclerView.Ada
         private val detailsView: TextView = itemView.findViewById(R.id.item_details)
 
         fun bind(record: ImageRecord) {
-            imageView.setImageURI(record.uri.toUri())
+            try {
+                imageView.setImageURI(record.uri.toUri())
+            } catch (e: SecurityException) {
+                imageView.setImageResource(R.drawable.ic_launcher_background) // Example placeholder
+            }
             nameView.text = record.name
             val date = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(record.dateModified))
             detailsView.text = "$date - ${record.width}x${record.height}"

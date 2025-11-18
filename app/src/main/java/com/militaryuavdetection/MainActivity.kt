@@ -7,7 +7,10 @@ import android.content.SharedPreferences
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.View
+import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -45,6 +48,12 @@ class MainActivity : AppCompatActivity() {
             } ?: result.data?.data?.let { listOf(it) } ?: emptyList()
 
             if (uris.isNotEmpty()) {
+                uris.forEach { uri ->
+                    contentResolver.takePersistableUriPermission(
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                }
                 insertUrisAsRecords(uris)
                 lifecycleScope.launch{
                     imageViewModel.getLastInsertedId()?.let { lastId ->
@@ -57,8 +66,12 @@ class MainActivity : AppCompatActivity() {
 
     private val openModelLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            result.data?.data?.let {
-                currentModel = it.path
+            result.data?.data?.let { uri ->
+                contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+                currentModel = uri.toString()
                 sharedPreferences.edit().putString("selected_model", currentModel).apply()
                 binding.browseModelButton.setImageResource(R.drawable.importmodel_check)
             }
@@ -82,7 +95,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupRecyclerView() {
-        fileListAdapter = FileListAdapter(emptyList())
+        fileListAdapter = FileListAdapter(emptyList(), emptyList())
         binding.recyclerView.adapter = fileListAdapter
         setViewMode(FileListAdapter.ViewMode.ICON)
 
@@ -92,9 +105,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun selectRecord(record: ImageRecord){
-        binding.imagePanel.setImageURI(record.uri.toUri())
-        binding.imageName.text = record.name
-        binding.imageSize.text = "${record.width}x${record.height}"
+        try {
+            binding.imagePanel.setImageURI(record.uri.toUri())
+            binding.imageName.text = record.name
+            binding.imageSize.text = "${record.width}x${record.height}"
+        } catch (e: SecurityException) {
+            Toast.makeText(this, "Permission denied for ${record.name}. Please re-import the file.", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun observeViewModel() {
@@ -118,6 +135,16 @@ class MainActivity : AppCompatActivity() {
 
         binding.extendListPanelButton.setOnClickListener { toggleListPanelExtension() }
         binding.searchIcon.setOnClickListener { showSearch() }
+
+        binding.searchEditText.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                fileListAdapter.filter(s.toString())
+            }
+
+            override fun afterTextChanged(s: Editable?) {}
+        })
     }
 
     private fun toggleListPanelExtension() {
@@ -133,6 +160,7 @@ class MainActivity : AppCompatActivity() {
             binding.taskbar.visibility = View.VISIBLE
             binding.viewModeButtons.visibility = View.VISIBLE
             binding.extendListPanelButton.setImageResource(R.drawable.screenshot)
+            hideSearch()
         }
     }
 
@@ -191,16 +219,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showSearch() {
-        val searchEditText = EditText(this)
-        AlertDialog.Builder(this)
-            .setTitle("Search")
-            .setView(searchEditText)
-            .setPositiveButton("Search") { _, _ ->
-                val query = searchEditText.text.toString()
-                // Perform search on the ViewModel
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+        binding.imageName.visibility = View.GONE
+        binding.imageSize.visibility = View.GONE
+        binding.extendListPanelButton.visibility = View.GONE
+        binding.searchEditText.visibility = View.VISIBLE
+        binding.searchEditText.requestFocus()
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.showSoftInput(binding.searchEditText, InputMethodManager.SHOW_IMPLICIT)
+    }
+
+    private fun hideSearch() {
+        binding.imageName.visibility = View.VISIBLE
+        binding.imageSize.visibility = View.VISIBLE
+        binding.extendListPanelButton.visibility = View.VISIBLE
+        binding.searchEditText.visibility = View.GONE
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.hideSoftInputFromWindow(binding.searchEditText.windowToken, 0)
     }
 
     private fun insertUrisAsRecords(uris: List<Uri>) {
@@ -216,7 +250,7 @@ class MainActivity : AppCompatActivity() {
                     options.outMimeType?.startsWith("video/") == true -> "VIDEO"
                     else -> return@mapNotNull null
                 }
-                
+
                 val documentFile = androidx.documentfile.provider.DocumentFile.fromSingleUri(this, uri)
 
                 ImageRecord(
