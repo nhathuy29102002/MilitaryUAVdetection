@@ -16,13 +16,16 @@ import java.util.*
 import kotlin.math.max
 import kotlin.math.min
 import ai.onnxruntime.providers.NNAPIFlags
+import android.graphics.Canvas
+import android.graphics.Color
+
 
 class ObjectDetector(private val context: Context) {
 
     // --- CẤU HÌNH ---
-    private val INPUT_SIZE = 416
+    private val INPUT_SIZE = 640
     private val CONFIDENCE_THRESHOLD = 0.25f
-    private val IOU_THRESHOLD = 0.5f
+    private val IOU_THRESHOLD = 0.6f
 
     private var ortSession: OrtSession? = null
     private var ortEnvironment: OrtEnvironment? = null
@@ -72,12 +75,8 @@ class ObjectDetector(private val context: Context) {
         if (ortSession == null) return@withContext emptyList()
 
         // 1. TIỀN XỬ LÝ (Resize & Normalize)
-        val (processedBitmap, _, _) = preprocess(bitmap)
+        val (processedBitmap, ratio, padding) = preprocess(bitmap) // Updated to get ratio and padding
         val inputTensorBuffer = bitmapToFloatBuffer(processedBitmap)
-
-        // Tính toán tỷ lệ scale cuối cùng dựa trên kích thước ẢNH GỐC (hoặc frame gốc)
-        val finalScaleX = INPUT_SIZE.toFloat() / originalWidth
-        val finalScaleY = INPUT_SIZE.toFloat() / originalHeight
 
         // 2. CHẠY MODEL (INFERENCE)
         val inputName = ortSession?.inputNames?.iterator()?.next() ?: return@withContext emptyList()
@@ -93,7 +92,7 @@ class ObjectDetector(private val context: Context) {
         val numChannels = tensorShape[1].toInt()
         val numAnchors = tensorShape[2].toInt()
 
-        return@withContext postprocess(outputBuffer, numChannels, numAnchors, finalScaleX, finalScaleY)
+        return@withContext postprocess(outputBuffer, numChannels, numAnchors, ratio, padding.first, padding.second, originalWidth, originalHeight)
     }
 
 
@@ -145,11 +144,29 @@ class ObjectDetector(private val context: Context) {
         return inSampleSize
     }
 
-    private fun preprocess(bitmap: Bitmap): Triple<Bitmap, Float, Float> {
-        val scaledBitmap = Bitmap.createScaledBitmap(bitmap, INPUT_SIZE, INPUT_SIZE, true)
-        val scaleX = INPUT_SIZE.toFloat() / bitmap.width
-        val scaleY = INPUT_SIZE.toFloat() / bitmap.height
-        return Triple(scaledBitmap, scaleX, scaleY)
+    private fun preprocess(bitmap: Bitmap): Triple<Bitmap, Float, Pair<Float, Float>> {
+        val originalWidth = bitmap.width.toFloat()
+        val originalHeight = bitmap.height.toFloat()
+
+        // Tính tỷ lệ giữ nguyên aspect ratio
+        val ratio = min(INPUT_SIZE.toFloat() / originalWidth, INPUT_SIZE.toFloat() / originalHeight)
+
+        val newWidth = (originalWidth * ratio).toInt()
+        val newHeight = (originalHeight * ratio).toInt()
+
+        // Tạo ảnh nền đen
+        val paddedBitmap = Bitmap.createBitmap(INPUT_SIZE, INPUT_SIZE, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(paddedBitmap)
+        canvas.drawColor(Color.BLACK)
+
+        // Vẽ ảnh đã resize vào giữa
+        val left = (INPUT_SIZE - newWidth) / 2f
+        val top = (INPUT_SIZE - newHeight) / 2f
+        val rectF = RectF(left, top, left + newWidth, top + newHeight)
+        canvas.drawBitmap(bitmap, null, rectF, null)
+
+        // Trả về Padded Bitmap, tỷ lệ scale, và offset (paddingX, paddingY)
+        return Triple(paddedBitmap, ratio, Pair(left, top))
     }
 
     private fun bitmapToFloatBuffer(bitmap: Bitmap): FloatBuffer {
@@ -175,7 +192,7 @@ class ObjectDetector(private val context: Context) {
     }
 
     private fun postprocess(
-        outputBuffer: FloatBuffer, numChannels: Int, numAnchors: Int, scaleX: Float, scaleY: Float
+        outputBuffer: FloatBuffer, numChannels: Int, numAnchors: Int, ratio: Float, paddingX: Float, paddingY: Float, originalWidth: Int, originalHeight: Int
     ): List<DetectionResult> {
         val detections = mutableListOf<DetectionResult>()
         outputBuffer.rewind()
@@ -194,12 +211,33 @@ class ObjectDetector(private val context: Context) {
                 val cy = outputBuffer.get(1 * numAnchors + i)
                 val w = outputBuffer.get(2 * numAnchors + i)
                 val h = outputBuffer.get(3 * numAnchors + i)
-                val left = (cx - w / 2) / scaleX
-                val top = (cy - h / 2) / scaleY
-                val right = (cx + w / 2) / scaleX
-                val bottom = (cy + h / 2) / scaleY
+
+                // Adjust for padding and scale back to original dimensions
+                val x_in_padded_input = cx // Model output coordinates are already in paddedBitmap (INPUT_SIZE x INPUT_SIZE) space
+                val y_in_padded_input = cy
+                val w_in_padded_input = w
+                val h_in_padded_input = h
+
+                // Convert from padded input space to scaled original image space
+                val left_scaled = (x_in_padded_input - w_in_padded_input / 2) - paddingX
+                val top_scaled = (y_in_padded_input - h_in_padded_input / 2) - paddingY
+                val right_scaled = (x_in_padded_input + w_in_padded_input / 2) - paddingX
+                val bottom_scaled = (y_in_padded_input + h_in_padded_input / 2) - paddingY
+
+                // Scale back to original image dimensions
+                val left = left_scaled / ratio
+                val top = top_scaled / ratio
+                val right = right_scaled / ratio
+                val bottom = bottom_scaled / ratio
+
+                // Clamp the bounding box to the original image dimensions
+                val finalLeft = max(0f, min(left, originalWidth.toFloat()))
+                val finalTop = max(0f, min(top, originalHeight.toFloat()))
+                val finalRight = max(0f, min(right, originalWidth.toFloat()))
+                val finalBottom = max(0f, min(bottom, originalHeight.toFloat()))
+
                 val label = labels.getOrElse(classId) { "Unknown" }
-                detections.add(DetectionResult(RectF(left, top, right, bottom), label, maxScore))
+                detections.add(DetectionResult(RectF(finalLeft, finalTop, finalRight, finalBottom), label, maxScore))
             }
         }
         return nms(detections)
