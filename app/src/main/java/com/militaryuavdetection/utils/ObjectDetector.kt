@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.RectF
 import android.net.Uri
+import android.util.Log
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
@@ -14,6 +15,7 @@ import java.nio.FloatBuffer
 import java.util.*
 import kotlin.math.max
 import kotlin.math.min
+import ai.onnxruntime.providers.NNAPIFlags
 
 class ObjectDetector(private val context: Context) {
 
@@ -34,7 +36,18 @@ class ObjectDetector(private val context: Context) {
                     ortEnvironment = OrtEnvironment.getEnvironment()
                 }
                 val modelBytes = context.assets.open(modelPath).readBytes()
-                ortSession = ortEnvironment?.createSession(modelBytes)
+
+                val sessionOptions = OrtSession.SessionOptions()
+                try {
+                    val nnapiFlags = EnumSet.of(NNAPIFlags.USE_FP16)
+                    sessionOptions.addNnapi(nnapiFlags)
+                    Log.d("ObjectDetector", "NNAPI Execution Provider is enabled.")
+                } catch (e: Exception) {
+                    Log.e("ObjectDetector", "Failed to enable NNAPI, falling back to CPU.", e)
+                }
+                // ------------------------------------
+
+                ortSession = ortEnvironment?.createSession(modelBytes, sessionOptions)
 
                 labels.clear()
                 context.assets.open(labelPath).bufferedReader().useLines { lines ->

@@ -69,6 +69,7 @@ dependencies {
 
     // 2. ONNX Runtime
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.18.0")
+
     
     // 3. Glide
     implementation("com.github.bumptech.glide:glide:4.16.0")
