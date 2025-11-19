@@ -50,45 +50,68 @@ class ObjectDetector(private val context: Context) {
     suspend fun analyzeImage(uri: Uri): List<DetectionResult> = withContext(Dispatchers.IO) {
         if (ortSession == null) return@withContext emptyList()
 
+        // Lấy kích thước ảnh gốc để tính toán tỷ lệ chính xác
+        val originalDimensions = getOriginalImageDimensions(uri) ?: return@withContext emptyList()
+        val originalWidth = originalDimensions.first
+        val originalHeight = originalDimensions.second
+
         // 1. TẢI ẢNH TỐI ƯU (Tránh OutOfMemory với ảnh lớn)
-        val bitmap = decodeBitmapFromUri(uri, INPUT_SIZE, INPUT_SIZE) ?: return@withContext emptyList()
+        // Tải bitmap đã được giảm tỷ lệ (sub-sampled) để xử lý
+        val processingBitmap = decodeBitmapFromUri(uri, INPUT_SIZE, INPUT_SIZE) ?: return@withContext emptyList()
 
         // 2. TIỀN XỬ LÝ (Resize & Normalize)
-        val (processedBitmap, scaleX, scaleY) = preprocess(bitmap)
+        // Resize ảnh đã sub-sample về kích thước input của model
+        val (processedBitmap, _, _) = preprocess(processingBitmap)
         val inputTensorBuffer = bitmapToFloatBuffer(processedBitmap)
+
+        // Tính toán tỷ lệ scale cuối cùng dựa trên kích thước ẢNH GỐC
+        val finalScaleX = INPUT_SIZE.toFloat() / originalWidth
+        val finalScaleY = INPUT_SIZE.toFloat() / originalHeight
+
 
         // 3. CHẠY MODEL (INFERENCE)
         val inputName = ortSession?.inputNames?.iterator()?.next() ?: return@withContext emptyList()
         val shape = longArrayOf(1, 3, INPUT_SIZE.toLong(), INPUT_SIZE.toLong())
-
-        // Tạo tensor
         val env = OrtEnvironment.getEnvironment()
         val inputTensor = OnnxTensor.createTensor(env, inputTensorBuffer, shape)
-
-        // Chạy session
         val results = ortSession?.run(Collections.singletonMap(inputName, inputTensor))
 
         // 4. HẬU XỬ LÝ (POST-PROCESS)
         val outputTensor = results?.get(0) as OnnxTensor
         val outputBuffer = outputTensor.floatBuffer
 
-        // Lấy shape output: [1, 4+classes, 8400]
         val tensorShape = outputTensor.info.shape
         val numChannels = tensorShape[1].toInt()
         val numAnchors = tensorShape[2].toInt()
 
-        // Trả về danh sách đã lọc NMS
-        return@withContext postprocess(outputBuffer, numChannels, numAnchors, scaleX, scaleY)
+        // Trả về danh sách đã lọc NMS với tỷ lệ scale chính xác
+        return@withContext postprocess(outputBuffer, numChannels, numAnchors, finalScaleX, finalScaleY)
     }
 
     // --- CÁC HÀM HỖ TRỢ ---
+
+    // Hàm mới: Lấy kích thước ảnh gốc mà không cần tải toàn bộ ảnh vào bộ nhớ
+    private fun getOriginalImageDimensions(uri: Uri): Pair<Int, Int>? {
+        return try {
+            val contentResolver = context.contentResolver
+            val pfd = contentResolver.openFileDescriptor(uri, "r") ?: return null
+            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, options)
+            pfd.close()
+            Pair(options.outWidth, options.outHeight)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
 
     // Tải bitmap thông minh: Tự tính toán inSampleSize để không tải ảnh gốc quá lớn
     private fun decodeBitmapFromUri(uri: Uri, reqWidth: Int, reqHeight: Int): Bitmap? {
         return try {
             val contentResolver = context.contentResolver
 
-            // Bước 1: Chỉ đọc kích thước ảnh
+            // Bước 1: Chỉ đọc kích thước ảnh để tính toán inSampleSize
             var pfd = contentResolver.openFileDescriptor(uri, "r") ?: return null
             val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, options)
@@ -125,6 +148,7 @@ class ObjectDetector(private val context: Context) {
 
     private fun preprocess(bitmap: Bitmap): Triple<Bitmap, Float, Float> {
         val scaledBitmap = Bitmap.createScaledBitmap(bitmap, INPUT_SIZE, INPUT_SIZE, true)
+        // Tỷ lệ này chỉ dùng để tham khảo, không còn dùng để tính toán tọa độ cuối cùng
         val scaleX = INPUT_SIZE.toFloat() / bitmap.width
         val scaleY = INPUT_SIZE.toFloat() / bitmap.height
         return Triple(scaledBitmap, scaleX, scaleY)
@@ -181,6 +205,7 @@ class ObjectDetector(private val context: Context) {
                 val h = outputBuffer.get(3 * numAnchors + i)
 
                 // Chuyển về tọa độ gốc của ảnh ban đầu (chia cho scaleX, scaleY)
+                // scaleX và scaleY giờ đây được tính toán dựa trên kích thước ảnh gốc
                 val left = (cx - w / 2) / scaleX
                 val top = (cy - h / 2) / scaleY
                 val right = (cx + w / 2) / scaleX
