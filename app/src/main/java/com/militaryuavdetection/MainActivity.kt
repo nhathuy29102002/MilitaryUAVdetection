@@ -28,6 +28,7 @@ import android.provider.MediaStore
 import android.text.Editable
 import android.text.TextWatcher
 import android.util.Log
+import android.util.Size
 import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
@@ -37,7 +38,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.camera.core.AspectRatio
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
@@ -58,6 +58,7 @@ import com.militaryuavdetection.database.ImageRecord
 import com.militaryuavdetection.databinding.ActivityMainBinding
 import com.militaryuavdetection.ui.adapter.FileListAdapter
 import com.militaryuavdetection.ui.adapter.GridSpacingItemDecoration
+import com.militaryuavdetection.utils.ByteTrackManager
 import com.militaryuavdetection.utils.ObjectDetector
 import com.militaryuavdetection.viewmodel.ImageViewModel
 import com.militaryuavdetection.viewmodel.ImageViewModelFactory
@@ -90,6 +91,7 @@ class MainActivity : AppCompatActivity() {
     private var markingMode = MarkingMode.OFF
     private var itemDecoration: GridSpacingItemDecoration? = null
     private lateinit var objectDetector: ObjectDetector
+    private lateinit var byteTrackManager: ByteTrackManager
     private val gson = Gson()
     private val instanceValues = mutableMapOf<String, Int>()
     private val colorMap = mapOf(
@@ -176,6 +178,7 @@ class MainActivity : AppCompatActivity() {
 
         sharedPreferences = getSharedPreferences("MilitaryUavPrefs", Context.MODE_PRIVATE)
         objectDetector = ObjectDetector(this)
+        byteTrackManager = ByteTrackManager()
 
         setupRecyclerView()
         setupClickListeners()
@@ -847,6 +850,9 @@ class MainActivity : AppCompatActivity() {
     private fun startRealTimeDetection() {
         isRealTimeDetectionActive = true
         Toast.makeText(this, "Real-time detection started.", Toast.LENGTH_SHORT).show()
+        
+        // Reset tracker
+        byteTrackManager = ByteTrackManager()
 
         // Prepare UI for real-time feed
         clearSelection()
@@ -882,40 +888,32 @@ class MainActivity : AppCompatActivity() {
             .build()
 
         val preview = Preview.Builder()
-            .setTargetAspectRatio(AspectRatio.RATIO_4_3)
+            .setTargetResolution(Size(640, 480)) // Sử dụng API mới
             .build()
             .also {
                 it.setSurfaceProvider(binding.previewView.surfaceProvider)
             }
 
         val imageAnalysis = ImageAnalysis.Builder()
-            .setTargetAspectRatio(AspectRatio.RATIO_4_3)
+            .setTargetResolution(Size(640, 480)) // Sử dụng API mới
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .build()
 
         imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
             val rotationDegrees = imageProxy.imageInfo.rotationDegrees
             val matrix = Matrix().apply {
-                // The camera sensor orientation is typically landscape, so we need to rotate
-                // the image data from the sensor to match the device's natural orientation.
                 postRotate(rotationDegrees.toFloat())
-
-                // Now, we must compute the scaling factors to transform the rotated image
-                // coordinates to the PreviewView coordinates.
                 if (rotationDegrees == 0 || rotationDegrees == 180) {
                     postScale(
                         binding.previewView.width.toFloat() / imageProxy.width,
                         binding.previewView.height.toFloat() / imageProxy.height
                     )
-                } else { // 90 or 270
+                } else {
                     postScale(
                         binding.previewView.width.toFloat() / imageProxy.height,
                         binding.previewView.height.toFloat() / imageProxy.width
                     )
                 }
-
-                // If the image is rotated, the coordinate system is also rotated.
-                // We need to translate the coordinates to match the PreviewView.
                 when (rotationDegrees) {
                     90 -> postTranslate(binding.previewView.width.toFloat(), 0f)
                     270 -> postTranslate(0f, binding.previewView.height.toFloat())
@@ -923,15 +921,28 @@ class MainActivity : AppCompatActivity() {
             }
 
             frameCounter++
-            if (frameCounter % 2 == 0) { // Process 15 out of 30 fps
+            // Giảm tần suất xử lý để tối ưu hiệu suất
+            if (frameCounter % 3 == 0) {
                 val bitmap = imageProxy.toBitmap()
                 if (bitmap != null) {
                     runBlocking {
                         val results = objectDetector.analyzeBitmap(bitmap, imageProxy.width, imageProxy.height)
-                        val filteredResults = filterDetections(results)
-                        lastDetections = filteredResults
+                        
+                        // --- TÍCH HỢP BYTETRACK ---
+                        val trackedObjects = byteTrackManager.update(results)
+                        val trackedDetections = trackedObjects.map { track ->
+                            ObjectDetector.DetectionResult(
+                                boundingBox = track.toTlbr(),
+                                label = track.label,
+                                confidence = track.score,
+                                trackId = track.trackId
+                            )
+                        }
+                        // -------------------------
+
+                        lastDetections = trackedDetections
                         withContext(Dispatchers.Main) {
-                            binding.imageView.setDetectionsWithTransform(filteredResults, imageProxy.width, imageProxy.height, matrix)
+                            binding.imageView.setDetectionsWithTransform(trackedDetections, imageProxy.width, imageProxy.height, matrix)
                         }
                     }
                     bitmap.recycle()
@@ -981,5 +992,4 @@ class MainActivity : AppCompatActivity() {
         val imageBytes = out.toByteArray()
         return BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
     }
-
 }

@@ -10,9 +10,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
-import com.militaryuavdetection.data.DetectionResult
 import com.militaryuavdetection.data.FileItem
-import com.militaryuavdetection.objectdetector.ObjectDetector
+import com.militaryuavdetection.utils.ObjectDetector // Thay đổi import
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
@@ -34,8 +33,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _selectedFile = MutableLiveData<FileItem?>(null)
     val selectedFile: LiveData<FileItem?> = _selectedFile
 
-    private val _realtimeResults = MutableLiveData<Pair<List<DetectionResult>, List<String>>>()
-    val realtimeResults: LiveData<Pair<List<DetectionResult>, List<String>>> = _realtimeResults
+    // Thay đổi kiểu dữ liệu của LiveData
+    private val _realtimeResults = MutableLiveData<Pair<List<ObjectDetector.DetectionResult>, List<String>>>()
+    val realtimeResults: LiveData<Pair<List<ObjectDetector.DetectionResult>, List<String>>> = _realtimeResults
 
     init {
         initializeModel()
@@ -46,9 +46,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val modelName = "yolov8n.onnx"
-
-                objectDetector = ObjectDetector(getApplication(), modelName)
-                objectDetector?.initialize()
+                // Sử dụng ObjectDetector từ package 'utils'
+                objectDetector = ObjectDetector(getApplication())
+                objectDetector?.loadModel(modelName) // Cập nhật lệnh gọi
                 _isModelLoaded.postValue(true)
                 Log.d("ViewModel", "Model $modelName initialized.")
             } catch (e: Exception) {
@@ -69,9 +69,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun detectInRealtime(bitmap: Bitmap) {
         if (_isModelLoaded.value != true) return
         viewModelScope.launch(Dispatchers.IO) {
-            val results = objectDetector?.detect(bitmap)
+            // Cập nhật lệnh gọi để phù hợp với `analyzeBitmap`
+            val results = objectDetector?.analyzeBitmap(bitmap, bitmap.width, bitmap.height)
+            // Lấy labels từ một nơi khác nếu cần, vì phiên bản này không có LABELS tĩnh
+            // Tạm thời dùng list rỗng
             results?.let {
-                _realtimeResults.postValue(Pair(it, ObjectDetector.LABELS))
+                _realtimeResults.postValue(Pair(it, emptyList()))
             }
         }
     }
@@ -115,6 +118,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         super.onCleared()
-        objectDetector?.close()
+        // Lớp ObjectDetector này không có phương thức close(), nên ta bỏ qua
     }
 }

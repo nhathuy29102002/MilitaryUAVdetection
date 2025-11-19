@@ -233,5 +233,10 @@ class ObjectDetector(private val context: Context) {
         return interArea / (boxAArea + boxBArea - interArea)
     }
 
-    data class DetectionResult(val boundingBox: RectF, val label: String, val confidence: Float)
+    data class DetectionResult(
+        val boundingBox: RectF,
+        val label: String,
+        val confidence: Float,
+        var trackId: Int? = null // Thêm trường trackId
+    )
 }

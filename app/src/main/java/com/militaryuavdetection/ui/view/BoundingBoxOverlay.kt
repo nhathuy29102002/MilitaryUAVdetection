@@ -7,11 +7,11 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.View
-import com.militaryuavdetection.data.DetectionResult
+import com.militaryuavdetection.utils.ObjectDetector
 
 class BoundingBoxOverlay(context: Context, attrs: AttributeSet?) : View(context, attrs) {
 
-    private var results: List<DetectionResult> = emptyList()
+    private var results: List<ObjectDetector.DetectionResult> = emptyList()
     private var labels: List<String> = emptyList()
 
     private var markType: Int = 3
@@ -33,7 +33,7 @@ class BoundingBoxOverlay(context: Context, attrs: AttributeSet?) : View(context,
         style = Paint.Style.FILL
     }
 
-    fun setResults(detections: List<DetectionResult>, type: Int, labels: List<String>) {
+    fun setResults(detections: List<ObjectDetector.DetectionResult>, type: Int, labels: List<String>) {
         this.results = detections
         this.markType = type
         this.labels = labels
@@ -56,10 +56,14 @@ class BoundingBoxOverlay(context: Context, attrs: AttributeSet?) : View(context,
             canvas.drawRect(screenRect, boxPaint)
 
             if (markType > 1) {
-                val labelText = if (markType == 2) {
-                    result.label
-                } else {
-                    "${result.label} ${"%.2f".format(result.confidence)}"
+                val labelText = buildString {
+                    // Hiển thị Track ID nếu có
+                    result.trackId?.let { append("ID: $it ") }
+                    
+                    when (markType) {
+                        2 -> append(result.label)
+                        else -> append("${result.label} ${"%.2f".format(result.confidence)}")
+                    }
                 }
 
                 val textBounds = android.graphics.Rect()
