@@ -10,10 +10,14 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
+import android.graphics.drawable.BitmapDrawable
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import android.text.Editable
 import android.text.TextWatcher
@@ -80,6 +84,12 @@ class MainActivity : AppCompatActivity() {
     )
     private var latestTmpUri: Uri? = null
 
+    // --- Video Related ---
+    private var videoDetections = mapOf<Long, List<ObjectDetector.DetectionResult>>()
+    private val syncHandler = Handler(Looper.getMainLooper())
+    private var syncRunnable: Runnable? = null
+    // ---------------------
+
     private val imageViewModel: ImageViewModel by viewModels {
         ImageViewModelFactory((application as MilitaryUavApplication).database.imageRecordDao())
     }
@@ -93,13 +103,25 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-    private val takePictureLauncher = registerForActivityResult(ActivityResultContracts.TakePicture()) { success ->
-        if (success) {
-            latestTmpUri?.let {
-                insertUrisAndAnalyze(listOf(it))
+    private val captureMediaLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            latestTmpUri?.let { uri ->
+                val contentResolver = applicationContext.contentResolver
+                try {
+                    contentResolver.openInputStream(uri)?.use { inputStream ->
+                        if (inputStream.available() > 0) {
+                            insertUrisAndAnalyze(listOf(uri))
+                        } else {
+                            Toast.makeText(this, "Failed to get media data.", Toast.LENGTH_SHORT).show()
+                        }
+                    } ?: Toast.makeText(this, "Failed to get media data.", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(this, "Error accessing media file.", Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
+
 
     private val openFilesLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
@@ -126,6 +148,13 @@ class MainActivity : AppCompatActivity() {
         observeViewModel()
         loadInitialData()
         loadInstanceValues()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        stopVideoPlaybackSync()
+        binding.videoView.pause()
+        binding.playPauseButton.setImageResource(android.R.drawable.ic_media_play)
     }
 
     private fun loadInstanceValues() {
@@ -168,23 +197,58 @@ class MainActivity : AppCompatActivity() {
     private fun selectRecord(record: ImageRecord) {
         currentRecord = record
         fileListAdapter.updateSelection(record)
+        stopVideoPlaybackSync()
+
         try {
-            binding.imagePanel.setImageURI(record.uri.toUri())
             binding.imageName.text = record.name
             binding.imageSize.text = "${record.width}x${record.height}"
 
-            val type = object : TypeToken<List<ObjectDetector.DetectionResult>>() {}.type
-            val detections: List<ObjectDetector.DetectionResult> = record.boundingBoxes?.let {
-                gson.fromJson(it, type)
-            } ?: emptyList()
-            binding.imagePanel.setDetections(detections, markingMode, instanceValues, colorMap)
-            binding.fitImageButton.visibility = View.GONE
+            if (record.mediaType == "VIDEO") {
+                binding.videoView.visibility = View.VISIBLE
+                binding.imageView.visibility = View.VISIBLE // Overlay
+                binding.playPauseButton.visibility = View.VISIBLE
+                binding.fitImageButton.visibility = View.GONE
+                binding.imageView.setBackgroundColor(Color.TRANSPARENT)
+
+                // *** FIX: CREATE AND SET A TRANSPARENT PLACEHOLDER BITMAP ***
+                if (record.width > 0 && record.height > 0) {
+                    val placeholderBitmap = Bitmap.createBitmap(record.width, record.height, Bitmap.Config.ARGB_8888)
+                    val placeholderDrawable = BitmapDrawable(resources, placeholderBitmap)
+                    binding.imageView.setImageDrawable(placeholderDrawable)
+                } else {
+                    binding.imageView.setImageDrawable(null)
+                }
+                // *** END FIX ***
+
+                binding.videoView.setVideoURI(record.uri.toUri())
+                binding.videoView.setOnPreparedListener { mp ->
+                    mp.isLooping = true
+                    binding.imageView.fitImage() // Fit the overlay
+                }
+
+                val type = object : TypeToken<Map<Long, List<ObjectDetector.DetectionResult>>>() {}.type
+                videoDetections = record.boundingBoxes?.let { gson.fromJson(it, type) } ?: emptyMap()
+
+            } else { // IMAGE
+                binding.videoView.visibility = View.GONE
+                binding.playPauseButton.visibility = View.GONE
+                binding.imageView.visibility = View.VISIBLE
+
+                binding.imageView.setImageURI(record.uri.toUri())
+                val type = object : TypeToken<List<ObjectDetector.DetectionResult>>() {}.type
+                val detections: List<ObjectDetector.DetectionResult> = record.boundingBoxes?.let {
+                    gson.fromJson(it, type)
+                } ?: emptyList()
+                binding.imageView.setDetections(detections, markingMode, instanceValues, colorMap)
+                binding.fitImageButton.visibility = View.GONE
+            }
 
         } catch (e: Exception) {
-            Toast.makeText(this, "Could not load image: ${record.name}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Could not load media: ${record.name}", Toast.LENGTH_SHORT).show()
             e.printStackTrace()
         }
     }
+
 
     private fun observeViewModel() {
         lifecycleScope.launch {
@@ -194,7 +258,6 @@ class MainActivity : AppCompatActivity() {
                 if (currentRecord != null && records.none { it.id == currentRecord!!.id }) {
                     clearSelection()
                 }
-                // Auto-select the last imported record if nothing is selected
                 if (currentRecord == null && records.isNotEmpty()) {
                     records.maxByOrNull { it.id }?.let { selectRecord(it) }
                 }
@@ -203,18 +266,30 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupClickListeners() {
-        binding.browseImageButton.setOnClickListener { openImagePicker() }
+        binding.browseImageButton.setOnClickListener { openMediaPicker() }
         binding.browseModelButton.setOnClickListener { openModelPicker() }
         binding.markTypeButton.setOnClickListener { cycleMarkingMode() }
-        binding.cameraButton.setOnClickListener { takePicture() }
+        binding.cameraButton.setOnClickListener { takeMedia() }
         binding.exportButton.setOnClickListener { exportImage() }
 
+        binding.playPauseButton.setOnClickListener {
+            if (binding.videoView.isPlaying) {
+                binding.videoView.pause()
+                stopVideoPlaybackSync()
+                binding.playPauseButton.setImageResource(android.R.drawable.ic_media_play)
+            } else {
+                binding.videoView.start()
+                startVideoPlaybackSync()
+                binding.playPauseButton.setImageResource(android.R.drawable.ic_media_pause)
+            }
+        }
+
         binding.fitImageButton.setOnClickListener {
-            binding.imagePanel.fitImage()
+            binding.imageView.fitImage()
             binding.fitImageButton.visibility = View.GONE
         }
 
-        binding.imagePanel.onTransformChanged = {
+        binding.imageView.onTransformChanged = {
             binding.fitImageButton.visibility = View.VISIBLE
         }
 
@@ -244,11 +319,7 @@ class MainActivity : AppCompatActivity() {
 
         binding.searchEditText.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                fileListAdapter.filter(s.toString())
-            }
-
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { fileListAdapter.filter(s.toString()) }
             override fun afterTextChanged(s: Editable?) {}
         })
 
@@ -262,10 +333,36 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun startVideoPlaybackSync() {
+        if (syncRunnable != null) return
+
+        syncRunnable = object : Runnable {
+            override fun run() {
+                if (binding.videoView.isPlaying) {
+                    val currentTimeMs = binding.videoView.currentPosition.toLong()
+                    val closestTimestamp = videoDetections.keys.minByOrNull { kotlin.math.abs(it - currentTimeMs) }
+
+                    closestTimestamp?.let {
+                        val detections = videoDetections[it] ?: emptyList()
+                        binding.imageView.setDetections(detections, markingMode, instanceValues, colorMap)
+                    }
+                    syncHandler.postDelayed(this, 40) // ~25 FPS
+                }
+            }
+        }
+        syncHandler.post(syncRunnable!!)
+    }
+
+    private fun stopVideoPlaybackSync() {
+        syncRunnable?.let { syncHandler.removeCallbacks(it) }
+        syncRunnable = null
+        binding.imageView.setDetections(emptyList(), markingMode, instanceValues, colorMap)
+    }
+
     private fun cycleMarkingMode() {
         markingMode = MarkingMode.values()[(markingMode.ordinal + 1) % MarkingMode.values().size]
         binding.markTypeButton.text = markingMode.name
-        binding.imagePanel.updateMarkingMode(markingMode)
+        binding.imageView.updateMarkingMode(markingMode)
     }
 
     private fun toggleListPanelExtension() {
@@ -285,8 +382,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showCameraOptions() { /* ... */ }
-    
     private fun showSearch() {
         binding.imageName.visibility = View.GONE
         binding.imageSize.visibility = View.GONE
@@ -305,56 +400,55 @@ class MainActivity : AppCompatActivity() {
         imm.hideSoftInputFromWindow(binding.searchEditText.windowToken, 0)
     }
 
-    private fun takePicture() {
+    private fun takeMedia() {
         if (currentModel == null) {
-            Toast.makeText(this, "Please select a model first to process the image.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Please select a model first.", Toast.LENGTH_SHORT).show()
             return
         }
         if (!packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)) {
-            Toast.makeText(this, "No camera available on this device.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "No camera available.", Toast.LENGTH_SHORT).show()
             return
         }
-
-        when (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)) {
-            PackageManager.PERMISSION_GRANTED -> {
-                launchCamera()
-            }
-            else -> {
-                requestPermissionLauncher.launch(Manifest.permission.CAMERA)
-            }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            launchCamera()
+        } else {
+            requestPermissionLauncher.launch(Manifest.permission.CAMERA)
         }
     }
 
     private fun launchCamera() {
-        lifecycleScope.launch {
-            getTmpFileUri().let {
-                latestTmpUri = it
-                takePictureLauncher.launch(it)
-            }
+        val intent = Intent(MediaStore.ACTION_VIDEO_CAPTURE)
+        latestTmpUri = getTmpFileUri(".mp4")
+        intent.putExtra(MediaStore.EXTRA_OUTPUT, latestTmpUri)
+        if (intent.resolveActivity(packageManager) != null) {
+            captureMediaLauncher.launch(intent)
+        } else {
+            Toast.makeText(this, "No app to handle video recording.", Toast.LENGTH_SHORT).show()
         }
     }
 
-    private fun getTmpFileUri(): Uri {
-        val tmpFile = File.createTempFile("tmp_image_file", ".png", cacheDir).apply {
+    private fun getTmpFileUri(extension: String = ".png"): Uri {
+        val tmpFile = File.createTempFile("tmp_media_file", extension, cacheDir).apply {
             createNewFile()
             deleteOnExit()
         }
-
         return FileProvider.getUriForFile(applicationContext, "${BuildConfig.APPLICATION_ID}.provider", tmpFile)
     }
 
-    private fun openImagePicker() {
+    private fun openMediaPicker() {
         if (currentModel == null) {
-            Toast.makeText(this, "Please select a model first to process the image.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Please select a model first.", Toast.LENGTH_SHORT).show()
             return
         }
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
-            type = "image/*"
+            type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "video/*"))
             putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
         }
         openFilesLauncher.launch(intent)
     }
+
 
     private fun openModelPicker() {
         try {
@@ -383,13 +477,14 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Error listing models.", Toast.LENGTH_SHORT).show()
         }
     }
+
     private fun exportImage() {
-        if (currentRecord == null) {
+        if (currentRecord == null || currentRecord!!.mediaType != "IMAGE") {
             Toast.makeText(this, "No image selected to export", Toast.LENGTH_SHORT).show()
             return
         }
 
-        val bitmapToExport = binding.imagePanel.createExportBitmap()
+        val bitmapToExport = binding.imageView.createExportBitmap()
         if (bitmapToExport == null) {
             Toast.makeText(this, "Could not create image for export", Toast.LENGTH_SHORT).show()
             return
@@ -400,7 +495,7 @@ class MainActivity : AppCompatActivity() {
             val resolver = contentResolver
 
             try {
-                val fos: OutputStream
+                val fos: OutputStream?
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     val contentValues = ContentValues().apply {
                         put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
@@ -408,24 +503,19 @@ class MainActivity : AppCompatActivity() {
                         put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + File.separator + "Export")
                     }
                     val imageUri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-                        ?: throw IOException("Failed to create new MediaStore entry.")
-                    fos = resolver.openOutputStream(imageUri)
-                        ?: throw IOException("Failed to get output stream.")
+                    fos = imageUri?.let { resolver.openOutputStream(it) }
                 } else {
                     @Suppress("DEPRECATION")
                     val exportDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Export")
-                    if (!exportDir.exists()) {
-                        exportDir.mkdirs()
-                    }
+                    if (!exportDir.exists()) exportDir.mkdirs()
                     val imageFile = File(exportDir, fileName)
                     fos = FileOutputStream(imageFile)
                 }
 
-                fos.use { stream ->
-                    if (!bitmapToExport.compress(Bitmap.CompressFormat.PNG, 100, stream)) {
-                        throw IOException("Failed to save bitmap.")
-                    }
-                }
+                fos?.use { stream ->
+                    bitmapToExport.compress(Bitmap.CompressFormat.PNG, 100, stream)
+                } ?: throw IOException("Failed to get output stream.")
+
 
                 withContext(Dispatchers.Main) {
                     Toast.makeText(this@MainActivity, "Image saved to Downloads/Export", Toast.LENGTH_LONG).show()
@@ -440,10 +530,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun clearSelection() {
+        stopVideoPlaybackSync()
+        binding.videoView.stopPlayback()
+        binding.videoView.visibility = View.GONE
+        binding.playPauseButton.visibility = View.GONE
+        binding.imageView.visibility = View.VISIBLE
+
         currentRecord = null
         fileListAdapter.updateSelection(null)
-        binding.imagePanel.setImageDrawable(null)
-        binding.imagePanel.setDetections(emptyList(), markingMode, instanceValues, colorMap)
+        binding.imageView.setImageDrawable(null)
+        binding.imageView.setDetections(emptyList(), markingMode, instanceValues, colorMap)
         binding.imageName.text = "Image Name"
         binding.imageSize.text = "Size"
         binding.fitImageButton.visibility = View.GONE
@@ -451,40 +547,62 @@ class MainActivity : AppCompatActivity() {
 
     private fun insertUrisAndAnalyze(uris: List<Uri>) {
         lifecycleScope.launch {
+            uris.forEach { uri ->
+                imageViewModel.getRecordByUri(uri.toString())?.let { imageViewModel.delete(it) }
+            }
+
             val recordsToInsert = uris.mapNotNull { uri ->
                 try {
-                    imageViewModel.getRecordByUri(uri.toString())?.let { imageViewModel.delete(it) }
-
                     val pfd = contentResolver.openFileDescriptor(uri, "r") ?: return@mapNotNull null
-                    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                    BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, options)
+                    val mimeType = contentResolver.getType(uri)
+
+                    val recordWidth: Int
+                    val recordHeight: Int
+                    val mediaType: String
+                    val bboxesJson: String
+
+                    if (mimeType?.startsWith("video/") == true) {
+                        mediaType = "VIDEO"
+                        val retriever = MediaMetadataRetriever()
+                        retriever.setDataSource(this@MainActivity, uri)
+                        recordWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt() ?: 0
+                        recordHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toInt() ?: 0
+
+                        val detectionsMap = processVideo(uri)
+                        bboxesJson = gson.toJson(detectionsMap)
+                        retriever.release()
+                    } else {
+                        mediaType = "IMAGE"
+                        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeFileDescriptor(pfd.fileDescriptor, null, options)
+                        recordWidth = options.outWidth
+                        recordHeight = options.outHeight
+                        val detections = if (currentModel != null) objectDetector.analyzeImage(uri) else emptyList()
+                        bboxesJson = gson.toJson(detections)
+                    }
                     pfd.close()
 
-                    val mediaType = if (options.outMimeType?.startsWith("image/") == true) "IMAGE" else "VIDEO"
                     val documentFile = androidx.documentfile.provider.DocumentFile.fromSingleUri(this@MainActivity, uri)!!
-
-                    val detections = if (mediaType == "IMAGE" && currentModel != null) objectDetector.analyzeImage(uri) else emptyList()
-                    val bboxesJson = gson.toJson(detections)
-
                     ImageRecord(
                         uri = uri.toString(),
                         name = documentFile.name ?: "Unknown",
                         dateModified = documentFile.lastModified(),
                         size = documentFile.length(),
                         mediaType = mediaType,
-                        width = options.outWidth,
-                        height = options.outHeight,
+                        width = recordWidth,
+                        height = recordHeight,
                         boundingBoxes = bboxesJson
                     )
                 } catch (e: Exception) {
                     e.printStackTrace()
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(this@MainActivity, "Failed to process: ${uri.path}", Toast.LENGTH_SHORT).show()
+                    }
                     null
                 }
             }
             if (recordsToInsert.isNotEmpty()) {
                 imageViewModel.insertAll(recordsToInsert)
-
-                // Immediately select the last added image to display.
                 val lastUriToSelect = uris.last()
                 imageViewModel.getRecordByUri(lastUriToSelect.toString())?.let { record ->
                     selectRecord(record)
@@ -492,6 +610,38 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+
+    private suspend fun processVideo(uri: Uri): Map<Long, List<ObjectDetector.DetectionResult>> = withContext(Dispatchers.IO) {
+        val detectionsMap = mutableMapOf<Long, List<ObjectDetector.DetectionResult>>()
+        val retriever = MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(this@MainActivity, uri)
+            val durationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+            val durationMs = durationStr?.toLong() ?: 0
+            val videoWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt() ?: 1
+            val videoHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toInt() ?: 1
+
+            // Tối ưu: Xử lý ~5 frames/giây
+            val intervalMs = 200L
+            var currentTimeMs = 0L
+
+            while (currentTimeMs < durationMs) {
+                val bitmap = retriever.getFrameAtTime(currentTimeMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST)
+                if (bitmap != null) {
+                    val detections = objectDetector.analyzeBitmap(bitmap, videoWidth, videoHeight)
+                    detectionsMap[currentTimeMs] = detections
+                    bitmap.recycle()
+                }
+                currentTimeMs += intervalMs
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        } finally {
+            retriever.release()
+        }
+        return@withContext detectionsMap
+    }
+
 
     private suspend fun loadSampleImages() = withContext(Dispatchers.IO) {
         val importDir = "import"
@@ -505,7 +655,6 @@ class MainActivity : AppCompatActivity() {
                         input.copyTo(output)
                     }
                 }
-                // Use FileProvider to get a content URI, which is required for sharing files safely.
                 FileProvider.getUriForFile(this@MainActivity, "${BuildConfig.APPLICATION_ID}.provider", tempFile)
             } catch (e: IOException) {
                 e.printStackTrace()
@@ -521,9 +670,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setViewMode(viewMode: FileListAdapter.ViewMode) {
         fileListAdapter.setViewMode(viewMode)
-
         itemDecoration?.let { binding.recyclerView.removeItemDecoration(it) }
-
         when (viewMode) {
             FileListAdapter.ViewMode.ICON -> {
                 val spanCount = 4
