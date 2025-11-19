@@ -10,6 +10,7 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
+import android.graphics.RectF
 import android.graphics.drawable.BitmapDrawable
 import android.media.MediaMetadataRetriever
 import android.net.Uri
@@ -55,6 +56,9 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStreamReader
 import java.io.OutputStream
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 
 enum class MarkingMode { OFF, MARK, BOX, NAME, CONF, SMART }
 
@@ -210,7 +214,6 @@ class MainActivity : AppCompatActivity() {
                 binding.fitImageButton.visibility = View.GONE
                 binding.imageView.setBackgroundColor(Color.TRANSPARENT)
 
-                // *** FIX: CREATE AND SET A TRANSPARENT PLACEHOLDER BITMAP ***
                 if (record.width > 0 && record.height > 0) {
                     val placeholderBitmap = Bitmap.createBitmap(record.width, record.height, Bitmap.Config.ARGB_8888)
                     val placeholderDrawable = BitmapDrawable(resources, placeholderBitmap)
@@ -218,12 +221,11 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     binding.imageView.setImageDrawable(null)
                 }
-                // *** END FIX ***
 
                 binding.videoView.setVideoURI(record.uri.toUri())
                 binding.videoView.setOnPreparedListener { mp ->
                     mp.isLooping = true
-                    binding.imageView.fitImage() // Fit the overlay
+                    binding.imageView.fitImage()
                 }
 
                 val type = object : TypeToken<Map<Long, List<ObjectDetector.DetectionResult>>>() {}.type
@@ -340,7 +342,7 @@ class MainActivity : AppCompatActivity() {
             override fun run() {
                 if (binding.videoView.isPlaying) {
                     val currentTimeMs = binding.videoView.currentPosition.toLong()
-                    val closestTimestamp = videoDetections.keys.minByOrNull { kotlin.math.abs(it - currentTimeMs) }
+                    val closestTimestamp = videoDetections.keys.minByOrNull { abs(it - currentTimeMs) }
 
                     closestTimestamp?.let {
                         val detections = videoDetections[it] ?: emptyList()
@@ -634,6 +636,20 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+    
+    private fun calculateIOU(box1: RectF, box2: RectF): Float {
+        val xA = max(box1.left, box2.left)
+        val yA = max(box1.top, box2.top)
+        val xB = min(box1.right, box2.right)
+        val yB = min(box1.bottom, box2.bottom)
+
+        val interArea = max(0f, xB - xA) * max(0f, yB - yA)
+        val box1Area = (box1.right - box1.left) * (box1.bottom - box1.top)
+        val box2Area = (box2.right - box2.left) * (box2.bottom - box2.top)
+        val iou = interArea / (box1Area + box2Area - interArea)
+        return iou
+    }
+
 
     private suspend fun processVideo(uri: Uri): Map<Long, List<ObjectDetector.DetectionResult>> = withContext(Dispatchers.IO) {
         val detectionsMap = mutableMapOf<Long, List<ObjectDetector.DetectionResult>>()
@@ -645,7 +661,6 @@ class MainActivity : AppCompatActivity() {
             val videoWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt() ?: 1
             val videoHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toInt() ?: 1
 
-            // Tối ưu: Xử lý ~5 frames/giây
             val intervalMs = 200L
             var currentTimeMs = 0L
 
@@ -663,7 +678,48 @@ class MainActivity : AppCompatActivity() {
         } finally {
             retriever.release()
         }
-        return@withContext detectionsMap
+
+        val interpolatedDetectionsMap = mutableMapOf<Long, List<ObjectDetector.DetectionResult>>()
+        val sortedTimestamps = detectionsMap.keys.sorted()
+
+        for (i in 0 until sortedTimestamps.size - 1) {
+            val ts1 = sortedTimestamps[i]
+            val ts2 = sortedTimestamps[i+1]
+            val detections1 = detectionsMap[ts1] ?: continue
+            val detections2 = detectionsMap[ts2] ?: continue
+
+            val interpolatedTs = (ts1 + ts2) / 2
+            val newDetections = mutableListOf<ObjectDetector.DetectionResult>()
+
+            detections1.forEach { d1 ->
+                detections2.forEach { d2 ->
+                    val conf1 = d1.confidence
+                    val conf2 = d2.confidence
+                    val iou = calculateIOU(d1.boundingBox, d2.boundingBox)
+                    
+                    if (d1.label == d2.label && abs(conf2 - conf1) <= 0.2 && (conf1 > 0.6 || conf2 > 0.6) && iou > 0.7) {
+                        val newBox = RectF(
+                            (d1.boundingBox.left + d2.boundingBox.left) / 2,
+                            (d1.boundingBox.top + d2.boundingBox.top) / 2,
+                            (d1.boundingBox.right + d2.boundingBox.right) / 2,
+                            (d1.boundingBox.bottom + d2.boundingBox.bottom) / 2
+                        )
+                        val newConf = (conf1 + conf2) / 2
+                        newDetections.add(ObjectDetector.DetectionResult(newBox, d1.label, newConf))
+                    }
+                }
+            }
+            if(newDetections.isNotEmpty()){
+                 interpolatedDetectionsMap[interpolatedTs] = newDetections
+            }
+        }
+
+        val finalDetections = (detectionsMap.asSequence() + interpolatedDetectionsMap.asSequence())
+            .distinct()
+            .groupBy({ it.key }, { it.value })
+            .mapValues { (_, values) -> values.flatten() }
+
+        return@withContext finalDetections
     }
 
 
