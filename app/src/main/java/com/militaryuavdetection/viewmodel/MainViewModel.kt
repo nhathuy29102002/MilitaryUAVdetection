@@ -33,9 +33,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _selectedFile = MutableLiveData<FileItem?>(null)
     val selectedFile: LiveData<FileItem?> = _selectedFile
 
-    // Thay đổi kiểu dữ liệu của LiveData
-    private val _realtimeResults = MutableLiveData<Pair<List<ObjectDetector.DetectionResult>, List<String>>>()
-    val realtimeResults: LiveData<Pair<List<ObjectDetector.DetectionResult>, List<String>>> = _realtimeResults
+    // Change the LiveData to hold a Triple, adding image dimensions
+    private val _realtimeResults = MutableLiveData<Triple<List<ObjectDetector.DetectionResult>, List<String>, Pair<Int, Int>>>()
+    val realtimeResults: LiveData<Triple<List<ObjectDetector.DetectionResult>, List<String>, Pair<Int, Int>>> = _realtimeResults
+
 
     init {
         initializeModel()
@@ -69,12 +70,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun detectInRealtime(bitmap: Bitmap) {
         if (_isModelLoaded.value != true) return
         viewModelScope.launch(Dispatchers.IO) {
-            // Cập nhật lệnh gọi để phù hợp với `analyzeBitmap`
-            val results = objectDetector?.analyzeBitmap(bitmap, bitmap.width, bitmap.height)
-            // Lấy labels từ một nơi khác nếu cần, vì phiên bản này không có LABELS tĩnh
-            // Tạm thời dùng list rỗng
+            val width = bitmap.width
+            val height = bitmap.height
+            val results = objectDetector?.analyzeBitmap(bitmap, width, height)
+            
             results?.let {
-                _realtimeResults.postValue(Pair(it, emptyList()))
+                // Post the dimensions along with the results
+                _realtimeResults.postValue(Triple(it, emptyList(), Pair(width, height)))
             }
         }
     }

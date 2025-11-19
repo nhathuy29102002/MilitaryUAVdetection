@@ -35,6 +35,8 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
     private var markingMode: MarkingMode = MarkingMode.OFF
     private var instanceValues: Map<String, Int> = emptyMap()
     private var colorMap: Map<Int, Int> = emptyMap()
+    private var imageWidth = 0
+    private var imageHeight = 0
 
     private val boxPaint = Paint()
     private val textPaint = Paint()
@@ -43,8 +45,6 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
     // --- Real-time Overlay ---
     private var isRealTimeOverlay = false
     private var realTimeMatrix = Matrix()
-    private var sourceWidth = 0
-    private var sourceHeight = 0
     // -------------------------
 
     var onTransformChanged: (() -> Unit)? = null
@@ -58,12 +58,16 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
         detections: List<ObjectDetector.DetectionResult>,
         markingMode: MarkingMode,
         instanceValues: Map<String, Int>,
-        colorMap: Map<Int, Int>
+        colorMap: Map<Int, Int>,
+        imageWidth: Int,
+        imageHeight: Int
     ) {
         this.detections = detections
         this.markingMode = markingMode
         this.instanceValues = instanceValues
         this.colorMap = colorMap
+        this.imageWidth = imageWidth
+        this.imageHeight = imageHeight
         this.isRealTimeOverlay = false
         fitImage(false)
         invalidate()
@@ -71,13 +75,13 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
 
     fun setDetectionsWithTransform(
         detections: List<ObjectDetector.DetectionResult>,
-        sourceWidth: Int,
-        sourceHeight: Int,
+        imageWidth: Int,
+        imageHeight: Int,
         transform: Matrix
     ) {
         this.detections = detections
-        this.sourceWidth = sourceWidth
-        this.sourceHeight = sourceHeight
+        this.imageWidth = imageWidth
+        this.imageHeight = imageHeight
         this.realTimeMatrix = transform
         this.isRealTimeOverlay = true
         invalidate()
@@ -114,10 +118,10 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         if (isRealTimeOverlay) {
-            drawDetectionsOnCanvas(canvas, realTimeMatrix, sourceWidth, sourceHeight)
+            drawDetectionsOnCanvas(canvas, realTimeMatrix, imageWidth, imageHeight)
         } else {
             if (drawable != null) {
-                drawDetectionsOnCanvas(canvas, imageMatrix, drawable.intrinsicWidth, drawable.intrinsicHeight)
+                drawDetectionsOnCanvas(canvas, imageMatrix, imageWidth, imageHeight)
             }
         }
     }
@@ -153,9 +157,8 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
             }
 
             val strokeWidth = when {
-                dWidth > 2000 || dHeight > 2000 -> max(3f, scaleOnCanvas * 4)
-                dWidth > 1200 || dHeight > 1200 -> max(2f, scaleOnCanvas * 3)
-                else -> max(1f, scaleOnCanvas * 2)
+                imageWidth > 640 || imageHeight > 640 -> 8f
+                else -> 4f
             }
             boxPaint.strokeWidth = strokeWidth
 
@@ -195,9 +198,8 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
         textPaint.color = if (value == 0 || value == 3 || value == 4) Color.BLACK else Color.WHITE
 
         val textSize = when {
-            imageWidth > 2000 || imageHeight > 2000 -> max(16f, scale * 22f)
-            imageWidth > 1200 || imageHeight > 1200 -> max(14f, scale * 18f)
-            else -> max(12f, scale * 15f)
+            imageWidth > 640 || imageHeight > 640 -> 50f
+            else -> 25f
         }
         textPaint.textSize = textSize
         val padding = textSize / 4f

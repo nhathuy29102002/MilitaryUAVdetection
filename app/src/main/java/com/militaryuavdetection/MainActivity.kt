@@ -284,7 +284,7 @@ class MainActivity : AppCompatActivity() {
                 val detections: List<ObjectDetector.DetectionResult> = record.boundingBoxes?.let {
                     gson.fromJson(it, type)
                 } ?: emptyList()
-                binding.imageView.setDetections(detections, markingMode, instanceValues, colorMap)
+                binding.imageView.setDetections(detections, markingMode, instanceValues, colorMap, record.width, record.height)
                 binding.fitImageButton.visibility = View.GONE
             }
 
@@ -409,7 +409,7 @@ class MainActivity : AppCompatActivity() {
 
                     closestTimestamp?.let {
                         val detections = videoDetections[it] ?: emptyList()
-                        binding.imageView.setDetections(detections, markingMode, instanceValues, colorMap)
+                        binding.imageView.setDetections(detections, markingMode, instanceValues, colorMap, currentRecord?.width ?: 0, currentRecord?.height ?: 0)
                     }
                     syncHandler.postDelayed(this, 40) // ~25 FPS
                 }
@@ -421,7 +421,7 @@ class MainActivity : AppCompatActivity() {
     private fun stopVideoPlaybackSync() {
         syncRunnable?.let { syncHandler.removeCallbacks(it) }
         syncRunnable = null
-        binding.imageView.setDetections(emptyList(), markingMode, instanceValues, colorMap)
+        binding.imageView.setDetections(emptyList(), markingMode, instanceValues, colorMap, 0, 0)
     }
 
     private fun cycleMarkingMode() {
@@ -628,7 +628,7 @@ class MainActivity : AppCompatActivity() {
 
         currentRecord = null
         fileListAdapter.updateSelection(null)
-        binding.imageView.setDetections(emptyList(), markingMode, instanceValues, colorMap)
+        binding.imageView.setDetections(emptyList(), markingMode, instanceValues, colorMap, 0, 0)
         binding.imageName.text = "Image Name"
         binding.imageSize.text = "Size"
         binding.fitImageButton.visibility = View.GONE
@@ -869,7 +869,7 @@ class MainActivity : AppCompatActivity() {
         cameraProviderFuture.get().unbindAll()
         binding.previewView.visibility = View.GONE
         val emptyDetections = emptyList<ObjectDetector.DetectionResult>()
-        binding.imageView.setDetections(emptyDetections, markingMode, instanceValues, colorMap)
+        binding.imageView.setDetections(emptyDetections, markingMode, instanceValues, colorMap, 0, 0)
         Toast.makeText(this, "Real-time detection stopped.", Toast.LENGTH_SHORT).show()
     }
 

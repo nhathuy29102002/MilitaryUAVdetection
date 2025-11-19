@@ -43,9 +43,17 @@ class CameraActivity : AppCompatActivity() {
             // Tạm thời để trống.
         }
 
-        viewModel.realtimeResults.observe(this) { (results, labels) ->
+        // Updated observer to handle the Triple
+        viewModel.realtimeResults.observe(this) { (results, labels, dimensions) ->
             if (results.isNotEmpty()) {
-                binding.cameraBboxOverlay.setResults(results, viewModel.markType.value ?: 3, labels)
+                val (imageWidth, imageHeight) = dimensions
+                binding.cameraBboxOverlay.setResults(
+                    results,
+                    viewModel.markType.value ?: 3,
+                    labels,
+                    imageWidth,
+                    imageHeight
+                )
             }
         }
 
