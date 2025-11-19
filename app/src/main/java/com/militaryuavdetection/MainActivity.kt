@@ -1,6 +1,7 @@
 package com.militaryuavdetection
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.ContentValues
 import android.content.Context
@@ -10,7 +11,11 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
+import android.graphics.ImageFormat
+import android.graphics.Matrix
+import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.YuvImage
 import android.graphics.drawable.BitmapDrawable
 import android.media.MediaMetadataRetriever
 import android.net.Uri
@@ -22,6 +27,8 @@ import android.os.Looper
 import android.provider.MediaStore
 import android.text.Editable
 import android.text.TextWatcher
+import android.util.Log
+import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
@@ -30,6 +37,12 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.core.AspectRatio
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageProxy
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.net.toUri
@@ -37,6 +50,7 @@ import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.google.common.util.concurrent.ListenableFuture
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.militaryuavdetection.BuildConfig
@@ -49,13 +63,16 @@ import com.militaryuavdetection.viewmodel.ImageViewModel
 import com.militaryuavdetection.viewmodel.ImageViewModelFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStreamReader
 import java.io.OutputStream
+import java.util.concurrent.Executors
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -94,6 +111,15 @@ class MainActivity : AppCompatActivity() {
     private var syncRunnable: Runnable? = null
     // ---------------------
 
+    // --- Real-time Detection ---
+    private var isRealTimeDetectionActive = false
+    private lateinit var cameraProviderFuture: ListenableFuture<ProcessCameraProvider>
+    private val cameraExecutor = Executors.newSingleThreadExecutor()
+    private val longPressHandler = Handler(Looper.getMainLooper())
+    private var frameCounter = 0
+    private var lastDetections: List<ObjectDetector.DetectionResult> = emptyList()
+    // --------------------------
+
     private val imageViewModel: ImageViewModel by viewModels {
         ImageViewModelFactory((application as MilitaryUavApplication).database.imageRecordDao())
     }
@@ -101,7 +127,11 @@ class MainActivity : AppCompatActivity() {
     private val requestPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted: Boolean ->
             if (isGranted) {
-                launchCamera()
+                if (isRealTimeDetectionActive) {
+                    startRealTimeDetection()
+                } else {
+                    launchCamera()
+                }
             } else {
                 Toast.makeText(this, "Camera permission denied.", Toast.LENGTH_SHORT).show()
             }
@@ -159,7 +189,16 @@ class MainActivity : AppCompatActivity() {
         stopVideoPlaybackSync()
         binding.videoView.pause()
         binding.playPauseButton.setImageResource(android.R.drawable.ic_media_play)
+        if(isRealTimeDetectionActive) {
+            stopRealTimeDetection()
+        }
     }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        cameraExecutor.shutdown()
+    }
+
 
     private fun loadInstanceValues() {
         try {
@@ -199,6 +238,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun selectRecord(record: ImageRecord) {
+        if(isRealTimeDetectionActive) stopRealTimeDetection()
         currentRecord = record
         fileListAdapter.updateSelection(record)
         stopVideoPlaybackSync()
@@ -235,7 +275,7 @@ class MainActivity : AppCompatActivity() {
                 binding.videoView.visibility = View.GONE
                 binding.playPauseButton.visibility = View.GONE
                 binding.imageView.visibility = View.VISIBLE
-
+                binding.imageView.setBackgroundColor(Color.TRANSPARENT)
                 binding.imageView.setImageURI(record.uri.toUri())
                 val type = object : TypeToken<List<ObjectDetector.DetectionResult>>() {}.type
                 val detections: List<ObjectDetector.DetectionResult> = record.boundingBoxes?.let {
@@ -267,12 +307,32 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    @SuppressLint("ClickableViewAccessibility")
     private fun setupClickListeners() {
         binding.browseImageButton.setOnClickListener { openMediaPicker() }
         binding.browseModelButton.setOnClickListener { openModelPicker() }
         binding.markTypeButton.setOnClickListener { cycleMarkingMode() }
-        binding.cameraButton.setOnClickListener { takeMedia() }
         binding.exportButton.setOnClickListener { exportImage() }
+
+        binding.cameraButton.setOnTouchListener { _, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    longPressHandler.postDelayed({
+                        toggleRealTimeDetection()
+                    }, 2000) // 2 seconds
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    longPressHandler.removeCallbacksAndMessages(null)
+                }
+            }
+            // Also handle click for normal camera operation
+            if (event.action == MotionEvent.ACTION_UP) {
+                if (!isRealTimeDetectionActive) {
+                    takeMedia()
+                }
+            }
+            true
+        }
 
         binding.playPauseButton.setOnClickListener {
             if (binding.videoView.isPlaying) {
@@ -561,10 +621,10 @@ class MainActivity : AppCompatActivity() {
         binding.videoView.visibility = View.GONE
         binding.playPauseButton.visibility = View.GONE
         binding.imageView.visibility = View.VISIBLE
+        binding.imageView.setImageDrawable(null)
 
         currentRecord = null
         fileListAdapter.updateSelection(null)
-        binding.imageView.setImageDrawable(null)
         binding.imageView.setDetections(emptyList(), markingMode, instanceValues, colorMap)
         binding.imageName.text = "Image Name"
         binding.imageSize.text = "Size"
@@ -765,4 +825,161 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+
+    // --- Real-time Detection Methods ---
+
+    private fun toggleRealTimeDetection() {
+        if (isRealTimeDetectionActive) {
+            stopRealTimeDetection()
+        } else {
+            if (currentModel == null) {
+                Toast.makeText(this, "Please select a model first.", Toast.LENGTH_SHORT).show()
+                return
+            }
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                startRealTimeDetection()
+            } else {
+                requestPermissionLauncher.launch(Manifest.permission.CAMERA)
+            }
+        }
+    }
+
+    private fun startRealTimeDetection() {
+        isRealTimeDetectionActive = true
+        Toast.makeText(this, "Real-time detection started.", Toast.LENGTH_SHORT).show()
+
+        // Prepare UI for real-time feed
+        clearSelection()
+        binding.previewView.visibility = View.VISIBLE
+        binding.videoView.visibility = View.GONE
+        binding.imageView.setBackgroundColor(Color.TRANSPARENT)
+        binding.imageView.setImageDrawable(null)
+
+        startCamera()
+    }
+
+    private fun stopRealTimeDetection() {
+        isRealTimeDetectionActive = false
+        cameraProviderFuture.get().unbindAll()
+        binding.previewView.visibility = View.GONE
+        val emptyDetections = emptyList<ObjectDetector.DetectionResult>()
+        binding.imageView.setDetections(emptyDetections, markingMode, instanceValues, colorMap)
+        Toast.makeText(this, "Real-time detection stopped.", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun startCamera() {
+        cameraProviderFuture = ProcessCameraProvider.getInstance(this)
+        cameraProviderFuture.addListener({
+            val cameraProvider = cameraProviderFuture.get()
+            bindCameraUseCases(cameraProvider)
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    @SuppressLint("UnsafeOptInUsageError")
+    private fun bindCameraUseCases(cameraProvider: ProcessCameraProvider) {
+        val cameraSelector = CameraSelector.Builder()
+            .requireLensFacing(CameraSelector.LENS_FACING_BACK)
+            .build()
+
+        val preview = Preview.Builder()
+            .setTargetAspectRatio(AspectRatio.RATIO_4_3)
+            .build()
+            .also {
+                it.setSurfaceProvider(binding.previewView.surfaceProvider)
+            }
+
+        val imageAnalysis = ImageAnalysis.Builder()
+            .setTargetAspectRatio(AspectRatio.RATIO_4_3)
+            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+            .build()
+
+        imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
+            val rotationDegrees = imageProxy.imageInfo.rotationDegrees
+            val matrix = Matrix().apply {
+                // The camera sensor orientation is typically landscape, so we need to rotate
+                // the image data from the sensor to match the device's natural orientation.
+                postRotate(rotationDegrees.toFloat())
+
+                // Now, we must compute the scaling factors to transform the rotated image
+                // coordinates to the PreviewView coordinates.
+                if (rotationDegrees == 0 || rotationDegrees == 180) {
+                    postScale(
+                        binding.previewView.width.toFloat() / imageProxy.width,
+                        binding.previewView.height.toFloat() / imageProxy.height
+                    )
+                } else { // 90 or 270
+                    postScale(
+                        binding.previewView.width.toFloat() / imageProxy.height,
+                        binding.previewView.height.toFloat() / imageProxy.width
+                    )
+                }
+
+                // If the image is rotated, the coordinate system is also rotated.
+                // We need to translate the coordinates to match the PreviewView.
+                when (rotationDegrees) {
+                    90 -> postTranslate(binding.previewView.width.toFloat(), 0f)
+                    270 -> postTranslate(0f, binding.previewView.height.toFloat())
+                }
+            }
+
+            frameCounter++
+            if (frameCounter % 2 == 0) { // Process 15 out of 30 fps
+                val bitmap = imageProxy.toBitmap()
+                if (bitmap != null) {
+                    runBlocking {
+                        val results = objectDetector.analyzeBitmap(bitmap, imageProxy.width, imageProxy.height)
+                        val filteredResults = filterDetections(results)
+                        lastDetections = filteredResults
+                        withContext(Dispatchers.Main) {
+                            binding.imageView.setDetectionsWithTransform(filteredResults, imageProxy.width, imageProxy.height, matrix)
+                        }
+                    }
+                    bitmap.recycle()
+                }
+            } else {
+                 runOnUiThread {
+                    binding.imageView.setDetectionsWithTransform(lastDetections, imageProxy.width, imageProxy.height, matrix)
+                 }
+            }
+            imageProxy.close()
+        }
+
+        try {
+            cameraProvider.unbindAll()
+            cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageAnalysis)
+        } catch (exc: Exception) {
+            Log.e("MainActivity", "Use case binding failed", exc)
+        }
+    }
+
+    private fun filterDetections(detections: List<ObjectDetector.DetectionResult>): List<ObjectDetector.DetectionResult> {
+        val screenBox = RectF(0f, 0f, 1f, 1f)
+        return detections.filterNot {
+            val iou = calculateIOU(it.boundingBox, screenBox)
+            iou >= 0.9 && it.confidence < 0.4
+        }
+    }
+
+    private fun ImageProxy.toBitmap(): Bitmap? {
+        val yBuffer = planes[0].buffer // Y
+        val uBuffer = planes[1].buffer // U
+        val vBuffer = planes[2].buffer // V
+
+        val ySize = yBuffer.remaining()
+        val uSize = uBuffer.remaining()
+        val vSize = vBuffer.remaining()
+
+        val nv21 = ByteArray(ySize + uSize + vSize)
+
+        yBuffer.get(nv21, 0, ySize)
+        vBuffer.get(nv21, ySize, vSize)
+        uBuffer.get(nv21, ySize + vSize, uSize)
+
+        val yuvImage = YuvImage(nv21, ImageFormat.NV21, this.width, this.height, null)
+        val out = ByteArrayOutputStream()
+        yuvImage.compressToJpeg(Rect(0, 0, yuvImage.width, yuvImage.height), 100, out)
+        val imageBytes = out.toByteArray()
+        return BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+    }
+
 }

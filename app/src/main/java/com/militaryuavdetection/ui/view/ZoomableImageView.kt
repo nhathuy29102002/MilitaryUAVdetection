@@ -30,6 +30,7 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
     private var minScale = 0.5f
     private var maxScale = 8.0f
 
+    // --- Detection Drawing ---
     private var detections: List<ObjectDetector.DetectionResult> = emptyList()
     private var markingMode: MarkingMode = MarkingMode.OFF
     private var instanceValues: Map<String, Int> = emptyMap()
@@ -38,6 +39,13 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
     private val boxPaint = Paint()
     private val textPaint = Paint()
     private val backgroundPaint = Paint()
+
+    // --- Real-time Overlay ---
+    private var isRealTimeOverlay = false
+    private var realTimeMatrix = Matrix()
+    private var sourceWidth = 0
+    private var sourceHeight = 0
+    // -------------------------
 
     var onTransformChanged: (() -> Unit)? = null
 
@@ -56,7 +64,22 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
         this.markingMode = markingMode
         this.instanceValues = instanceValues
         this.colorMap = colorMap
+        this.isRealTimeOverlay = false
         fitImage(false)
+        invalidate()
+    }
+
+    fun setDetectionsWithTransform(
+        detections: List<ObjectDetector.DetectionResult>,
+        sourceWidth: Int,
+        sourceHeight: Int,
+        transform: Matrix
+    ) {
+        this.detections = detections
+        this.sourceWidth = sourceWidth
+        this.sourceHeight = sourceHeight
+        this.realTimeMatrix = transform
+        this.isRealTimeOverlay = true
         invalidate()
     }
 
@@ -90,15 +113,17 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        if (drawable == null) return
-        drawDetectionsOnCanvas(canvas, imageMatrix)
+        if (isRealTimeOverlay) {
+            drawDetectionsOnCanvas(canvas, realTimeMatrix, sourceWidth, sourceHeight)
+        } else {
+            if (drawable != null) {
+                drawDetectionsOnCanvas(canvas, imageMatrix, drawable.intrinsicWidth, drawable.intrinsicHeight)
+            }
+        }
     }
 
-    private fun drawDetectionsOnCanvas(canvas: Canvas, matrix: Matrix) {
-        if (drawable == null || markingMode == MarkingMode.OFF) return
-
-        val dWidth = drawable.intrinsicWidth
-        val dHeight = drawable.intrinsicHeight
+    private fun drawDetectionsOnCanvas(canvas: Canvas, matrix: Matrix, dWidth: Int, dHeight: Int) {
+        if (markingMode == MarkingMode.OFF) return
 
         val drawableRect = RectF(0f, 0f, dWidth.toFloat(), dHeight.toFloat())
         val mappedRect = RectF()
@@ -127,14 +152,12 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
                 matrix.mapRect(this, originalBox)
             }
 
-            // --- THAY ĐỔI LOGIC ĐỘ DÀY VIỀN ---
             val strokeWidth = when {
                 dWidth > 2000 || dHeight > 2000 -> max(3f, scaleOnCanvas * 4)
                 dWidth > 1200 || dHeight > 1200 -> max(2f, scaleOnCanvas * 3)
                 else -> max(1f, scaleOnCanvas * 2)
             }
             boxPaint.strokeWidth = strokeWidth
-            // ------------------------------------
 
             when (markingMode) {
                 MarkingMode.MARK -> {
@@ -150,7 +173,6 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
                     boxPaint.style = Paint.Style.STROKE
                     canvas.drawRect(mappedBox, boxPaint)
                     val labelText = if (markingMode == MarkingMode.NAME) detection.label else "${detection.label} ${String.format("%.2f", detection.confidence)}"
-                    // Truyền kích thước ảnh vào hàm drawLabel
                     drawLabel(canvas, mappedBox, labelText, value, color, scaleOnCanvas, dWidth, dHeight)
                 }
                 MarkingMode.SMART -> {
@@ -168,22 +190,16 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
         }
     }
 
-    // Thêm imageWidth và imageHeight vào tham số của hàm
     private fun drawLabel(canvas: Canvas, box: RectF, text: String, value: Int, color: Int, scale: Float, imageWidth: Int, imageHeight: Int) {
         backgroundPaint.color = color
-
-        // --- THAY ĐỔI LOGIC MÀU CHỮ ---
         textPaint.color = if (value == 0 || value == 3 || value == 4) Color.BLACK else Color.WHITE
-        // -----------------------------
 
-        // --- THAY ĐỔI LOGIC KÍCH THƯỚC CHỮ ---
         val textSize = when {
             imageWidth > 2000 || imageHeight > 2000 -> max(16f, scale * 22f)
             imageWidth > 1200 || imageHeight > 1200 -> max(14f, scale * 18f)
             else -> max(12f, scale * 15f)
         }
         textPaint.textSize = textSize
-        // ------------------------------------
         val padding = textSize / 4f
 
         val textBounds = Rect()
@@ -206,6 +222,8 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (isRealTimeOverlay) return false // Disable touch in real-time mode
+
         scaleGestureDetector.onTouchEvent(event)
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
@@ -252,7 +270,7 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
         val canvas = Canvas(exportBitmap)
 
         val exportMatrix = Matrix()
-        drawDetectionsOnCanvas(canvas, exportMatrix)
+        drawDetectionsOnCanvas(canvas, exportMatrix, originalBitmap.width, originalBitmap.height)
 
         return exportBitmap
     }
