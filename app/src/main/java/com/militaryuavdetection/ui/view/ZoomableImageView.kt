@@ -22,9 +22,14 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
 
     private var scaleGestureDetector: ScaleGestureDetector
     private val viewMatrix = Matrix()
-    private var scaleFactor = 1.0f
+    private var currentScale = 1.0f
     private var lastTouch = PointF()
     private var isDragging = false
+
+    // Biến lưu tỷ lệ ban đầu để tính toán giới hạn zoom tương đối
+    private var initialFitScale = 1.0f
+    private var minScale = 0.5f // Giới hạn zoom nhỏ nhất (tương đối so với initialFitScale)
+    private var maxScale = 8.0f // Giới hạn zoom lớn nhất (tương đối so với initialFitScale)
 
     private var detections: List<ObjectDetector.DetectionResult> = emptyList()
     private var markingMode: MarkingMode = MarkingMode.OFF
@@ -52,7 +57,12 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
         this.markingMode = markingMode
         this.instanceValues = instanceValues
         this.colorMap = colorMap
-        fitImage(false) // Don't trigger callback on initial set
+        fitImage(false)
+        invalidate()
+    }
+
+    fun updateMarkingMode(newMarkingMode: MarkingMode) {
+        this.markingMode = newMarkingMode
         invalidate()
     }
 
@@ -63,12 +73,16 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
         val dHeight = drawable.intrinsicHeight.toFloat()
 
         val scale = if (dWidth * height > width * dHeight) width / dWidth else height / dHeight
+        initialFitScale = scale // Lưu lại tỷ lệ "vừa màn hình" ban đầu
+        currentScale = scale
+
         val dx = (width - dWidth * scale) * 0.5f
         val dy = (height - dHeight * scale) * 0.5f
 
+        viewMatrix.reset()
         viewMatrix.setScale(scale, scale)
         viewMatrix.postTranslate(dx, dy)
-        imageMatrix = viewMatrix // Use imageMatrix provided by AppCompatImageView
+        imageMatrix = viewMatrix
 
         if (notify) {
             onTransformChanged?.invoke()
@@ -87,7 +101,7 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
         val drawableRect = RectF(0f, 0f, drawable.intrinsicWidth.toFloat(), drawable.intrinsicHeight.toFloat())
         val mappedRect = RectF()
         matrix.mapRect(mappedRect, drawableRect)
-        val currentScale = mappedRect.width() / drawable.intrinsicWidth.toFloat()
+        val scaleOnCanvas = mappedRect.width() / drawable.intrinsicWidth.toFloat()
 
         val detectionsToDraw = when (markingMode) {
             MarkingMode.SMART -> {
@@ -111,13 +125,13 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
                 matrix.mapRect(this, originalBox)
             }
 
-            val strokeWidth = max(1f, currentScale * 2)
+            val strokeWidth = max(1f, scaleOnCanvas * 2)
             boxPaint.strokeWidth = strokeWidth
 
             when (markingMode) {
                 MarkingMode.MARK -> {
                     boxPaint.style = Paint.Style.FILL
-                    val markSize = max(4f, currentScale * 6)
+                    val markSize = max(4f, scaleOnCanvas * 6)
                     canvas.drawRect(mappedBox.centerX() - markSize, mappedBox.centerY() - markSize, mappedBox.centerX() + markSize, mappedBox.centerY() + markSize, boxPaint)
                 }
                 MarkingMode.BOX -> {
@@ -128,7 +142,7 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
                     boxPaint.style = Paint.Style.STROKE
                     canvas.drawRect(mappedBox, boxPaint)
                     val labelText = if (markingMode == MarkingMode.NAME) detection.label else "${detection.label} ${String.format("%.2f", detection.confidence)}"
-                    drawLabel(canvas, mappedBox, labelText, value, color, currentScale)
+                    drawLabel(canvas, mappedBox, labelText, value, color, scaleOnCanvas)
                 }
                 MarkingMode.SMART -> {
                     if (drawBox) {
@@ -136,7 +150,7 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
                         canvas.drawRect(mappedBox, boxPaint)
                     } else {
                         boxPaint.style = Paint.Style.FILL
-                        val markSize = max(2f, currentScale * 3)
+                        val markSize = max(2f, scaleOnCanvas * 3)
                         canvas.drawRect(mappedBox.centerX() - markSize, mappedBox.centerY() - markSize, mappedBox.centerX() + markSize, mappedBox.centerY() + markSize, boxPaint)
                     }
                 }
@@ -196,10 +210,16 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
 
     private inner class ScaleListener : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScale(detector: ScaleGestureDetector): Boolean {
-            val newScaleFactor = scaleFactor * detector.scaleFactor
-            if (newScaleFactor >= 1.0f) { // Prevent zooming out beyond initial fit
-                scaleFactor = newScaleFactor
-                viewMatrix.postScale(detector.scaleFactor, detector.scaleFactor, detector.focusX, detector.focusY)
+            val scale = detector.scaleFactor
+            val newScale = currentScale * scale
+
+            // Tính toán giới hạn tuyệt đối dựa trên tỷ lệ ban đầu
+            val absoluteMinScale = initialFitScale * minScale
+            val absoluteMaxScale = initialFitScale * maxScale
+
+            if (newScale in absoluteMinScale..absoluteMaxScale) {
+                currentScale = newScale
+                viewMatrix.postScale(scale, scale, detector.focusX, detector.focusY)
                 imageMatrix = viewMatrix
                 onTransformChanged?.invoke()
             }
@@ -213,7 +233,7 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
         val exportBitmap = originalBitmap.copy(Bitmap.Config.ARGB_8888, true)
         val canvas = Canvas(exportBitmap)
 
-        val exportMatrix = Matrix() // Identity matrix for original scale
+        val exportMatrix = Matrix()
         drawDetectionsOnCanvas(canvas, exportMatrix)
 
         return exportBitmap

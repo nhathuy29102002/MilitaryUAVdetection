@@ -1,10 +1,12 @@
 package com.militaryuavdetection
 
+import android.Manifest
 import android.app.Activity
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
@@ -23,6 +25,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.core.net.toUri
 import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
@@ -30,6 +34,7 @@ import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import com.militaryuavdetection.BuildConfig
 import com.militaryuavdetection.database.ImageRecord
 import com.militaryuavdetection.databinding.ActivityMainBinding
 import com.militaryuavdetection.ui.adapter.FileListAdapter
@@ -73,9 +78,27 @@ class MainActivity : AppCompatActivity() {
         7 to Color.parseColor("#ed3c4d"),
         8 to Color.parseColor("#fe7ef7")
     )
+    private var latestTmpUri: Uri? = null
 
     private val imageViewModel: ImageViewModel by viewModels {
         ImageViewModelFactory((application as MilitaryUavApplication).database.imageRecordDao())
+    }
+
+    private val requestPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted: Boolean ->
+            if (isGranted) {
+                launchCamera()
+            } else {
+                Toast.makeText(this, "Camera permission denied.", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+    private val takePictureLauncher = registerForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+        if (success) {
+            latestTmpUri?.let {
+                insertUrisAndAnalyze(listOf(it))
+            }
+        }
     }
 
     private val openFilesLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -183,7 +206,7 @@ class MainActivity : AppCompatActivity() {
         binding.browseImageButton.setOnClickListener { openImagePicker() }
         binding.browseModelButton.setOnClickListener { openModelPicker() }
         binding.markTypeButton.setOnClickListener { cycleMarkingMode() }
-        binding.cameraButton.setOnClickListener { showCameraOptions() }
+        binding.cameraButton.setOnClickListener { takePicture() }
         binding.exportButton.setOnClickListener { exportImage() }
 
         binding.fitImageButton.setOnClickListener {
@@ -242,7 +265,7 @@ class MainActivity : AppCompatActivity() {
     private fun cycleMarkingMode() {
         markingMode = MarkingMode.values()[(markingMode.ordinal + 1) % MarkingMode.values().size]
         binding.markTypeButton.text = markingMode.name
-        currentRecord?.let { selectRecord(it) } // Re-select to redraw with new mode
+        binding.imagePanel.updateMarkingMode(markingMode)
     }
 
     private fun toggleListPanelExtension() {
@@ -263,10 +286,68 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showCameraOptions() { /* ... */ }
-    private fun showSearch() { /* ... */ }
-    private fun hideSearch() { /* ... */ }
+    
+    private fun showSearch() {
+        binding.imageName.visibility = View.GONE
+        binding.imageSize.visibility = View.GONE
+        binding.searchEditText.visibility = View.VISIBLE
+        binding.searchEditText.requestFocus()
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.showSoftInput(binding.searchEditText, InputMethodManager.SHOW_IMPLICIT)
+    }
+
+    private fun hideSearch() {
+        binding.searchEditText.visibility = View.GONE
+        binding.imageName.visibility = View.VISIBLE
+        binding.imageSize.visibility = View.VISIBLE
+        binding.searchEditText.text.clear()
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.hideSoftInputFromWindow(binding.searchEditText.windowToken, 0)
+    }
+
+    private fun takePicture() {
+        if (currentModel == null) {
+            Toast.makeText(this, "Please select a model first to process the image.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (!packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)) {
+            Toast.makeText(this, "No camera available on this device.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        when (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)) {
+            PackageManager.PERMISSION_GRANTED -> {
+                launchCamera()
+            }
+            else -> {
+                requestPermissionLauncher.launch(Manifest.permission.CAMERA)
+            }
+        }
+    }
+
+    private fun launchCamera() {
+        lifecycleScope.launch {
+            getTmpFileUri().let {
+                latestTmpUri = it
+                takePictureLauncher.launch(it)
+            }
+        }
+    }
+
+    private fun getTmpFileUri(): Uri {
+        val tmpFile = File.createTempFile("tmp_image_file", ".png", cacheDir).apply {
+            createNewFile()
+            deleteOnExit()
+        }
+
+        return FileProvider.getUriForFile(applicationContext, "${BuildConfig.APPLICATION_ID}.provider", tmpFile)
+    }
 
     private fun openImagePicker() {
+        if (currentModel == null) {
+            Toast.makeText(this, "Please select a model first to process the image.", Toast.LENGTH_SHORT).show()
+            return
+        }
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "image/*"
@@ -370,7 +451,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun insertUrisAndAnalyze(uris: List<Uri>) {
         lifecycleScope.launch {
-            var lastInsertedId: Long? = null
             val recordsToInsert = uris.mapNotNull { uri ->
                 try {
                     imageViewModel.getRecordByUri(uri.toString())?.let { imageViewModel.delete(it) }
@@ -403,10 +483,10 @@ class MainActivity : AppCompatActivity() {
             }
             if (recordsToInsert.isNotEmpty()) {
                 imageViewModel.insertAll(recordsToInsert)
-                lastInsertedId = imageViewModel.getLastInsertedId()
-            }
-            lastInsertedId?.let {
-                imageViewModel.getRecordById(it)?.let { record ->
+
+                // Immediately select the last added image to display.
+                val lastUriToSelect = uris.last()
+                imageViewModel.getRecordByUri(lastUriToSelect.toString())?.let { record ->
                     selectRecord(record)
                 }
             }
@@ -425,7 +505,8 @@ class MainActivity : AppCompatActivity() {
                         input.copyTo(output)
                     }
                 }
-                Uri.fromFile(tempFile)
+                // Use FileProvider to get a content URI, which is required for sharing files safely.
+                FileProvider.getUriForFile(this@MainActivity, "${BuildConfig.APPLICATION_ID}.provider", tempFile)
             } catch (e: IOException) {
                 e.printStackTrace()
                 null
