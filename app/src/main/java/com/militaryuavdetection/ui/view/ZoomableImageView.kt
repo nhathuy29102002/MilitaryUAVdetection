@@ -26,10 +26,9 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
     private var lastTouch = PointF()
     private var isDragging = false
 
-    // Biến lưu tỷ lệ ban đầu để tính toán giới hạn zoom tương đối
     private var initialFitScale = 1.0f
-    private var minScale = 0.5f // Giới hạn zoom nhỏ nhất (tương đối so với initialFitScale)
-    private var maxScale = 8.0f // Giới hạn zoom lớn nhất (tương đối so với initialFitScale)
+    private var minScale = 0.5f
+    private var maxScale = 8.0f
 
     private var detections: List<ObjectDetector.DetectionResult> = emptyList()
     private var markingMode: MarkingMode = MarkingMode.OFF
@@ -73,7 +72,7 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
         val dHeight = drawable.intrinsicHeight.toFloat()
 
         val scale = if (dWidth * height > width * dHeight) width / dWidth else height / dHeight
-        initialFitScale = scale // Lưu lại tỷ lệ "vừa màn hình" ban đầu
+        initialFitScale = scale
         currentScale = scale
 
         val dx = (width - dWidth * scale) * 0.5f
@@ -98,10 +97,13 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
     private fun drawDetectionsOnCanvas(canvas: Canvas, matrix: Matrix) {
         if (drawable == null || markingMode == MarkingMode.OFF) return
 
-        val drawableRect = RectF(0f, 0f, drawable.intrinsicWidth.toFloat(), drawable.intrinsicHeight.toFloat())
+        val dWidth = drawable.intrinsicWidth
+        val dHeight = drawable.intrinsicHeight
+
+        val drawableRect = RectF(0f, 0f, dWidth.toFloat(), dHeight.toFloat())
         val mappedRect = RectF()
         matrix.mapRect(mappedRect, drawableRect)
-        val scaleOnCanvas = mappedRect.width() / drawable.intrinsicWidth.toFloat()
+        val scaleOnCanvas = mappedRect.width() / dWidth.toFloat()
 
         val detectionsToDraw = when (markingMode) {
             MarkingMode.SMART -> {
@@ -125,8 +127,14 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
                 matrix.mapRect(this, originalBox)
             }
 
-            val strokeWidth = max(1f, scaleOnCanvas * 2)
+            // --- THAY ĐỔI LOGIC ĐỘ DÀY VIỀN ---
+            val strokeWidth = when {
+                dWidth > 2000 || dHeight > 2000 -> max(3f, scaleOnCanvas * 4)
+                dWidth > 1200 || dHeight > 1200 -> max(2f, scaleOnCanvas * 3)
+                else -> max(1f, scaleOnCanvas * 2)
+            }
             boxPaint.strokeWidth = strokeWidth
+            // ------------------------------------
 
             when (markingMode) {
                 MarkingMode.MARK -> {
@@ -142,7 +150,8 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
                     boxPaint.style = Paint.Style.STROKE
                     canvas.drawRect(mappedBox, boxPaint)
                     val labelText = if (markingMode == MarkingMode.NAME) detection.label else "${detection.label} ${String.format("%.2f", detection.confidence)}"
-                    drawLabel(canvas, mappedBox, labelText, value, color, scaleOnCanvas)
+                    // Truyền kích thước ảnh vào hàm drawLabel
+                    drawLabel(canvas, mappedBox, labelText, value, color, scaleOnCanvas, dWidth, dHeight)
                 }
                 MarkingMode.SMART -> {
                     if (drawBox) {
@@ -159,12 +168,22 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
         }
     }
 
-    private fun drawLabel(canvas: Canvas, box: RectF, text: String, value: Int, color: Int, scale: Float) {
+    // Thêm imageWidth và imageHeight vào tham số của hàm
+    private fun drawLabel(canvas: Canvas, box: RectF, text: String, value: Int, color: Int, scale: Float, imageWidth: Int, imageHeight: Int) {
         backgroundPaint.color = color
-        textPaint.color = if (value == 0) Color.BLACK else Color.WHITE
 
-        val textSize = max(12f, scale * 15f)
+        // --- THAY ĐỔI LOGIC MÀU CHỮ ---
+        textPaint.color = if (value == 0 || value == 3 || value == 4 ) Color.BLACK else Color.WHITE
+        // -----------------------------
+
+        // --- THAY ĐỔI LOGIC KÍCH THƯỚC CHỮ ---
+        val textSize = when {
+            imageWidth > 2000 || imageHeight > 2000 -> max(16f, scale * 22f)
+            imageWidth > 1200 || imageHeight > 1200 -> max(14f, scale * 18f)
+            else -> max(12f, scale * 15f)
+        }
         textPaint.textSize = textSize
+        // ------------------------------------
         val padding = textSize / 4f
 
         val textBounds = Rect()
@@ -213,7 +232,6 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
             val scale = detector.scaleFactor
             val newScale = currentScale * scale
 
-            // Tính toán giới hạn tuyệt đối dựa trên tỷ lệ ban đầu
             val absoluteMinScale = initialFitScale * minScale
             val absoluteMaxScale = initialFitScale * maxScale
 
