@@ -417,6 +417,30 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun launchCamera() {
+        val options = arrayOf("Take Photo", "Record Video")
+        AlertDialog.Builder(this)
+            .setTitle("Choose an action")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> launchImageCamera()
+                    1 -> launchVideoCamera()
+                }
+            }
+            .show()
+    }
+
+    private fun launchImageCamera() {
+        val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+        latestTmpUri = getTmpFileUri(".jpg")
+        intent.putExtra(MediaStore.EXTRA_OUTPUT, latestTmpUri)
+        if (intent.resolveActivity(packageManager) != null) {
+            captureMediaLauncher.launch(intent)
+        } else {
+            Toast.makeText(this, "No app to handle image capture.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun launchVideoCamera() {
         val intent = Intent(MediaStore.ACTION_VIDEO_CAPTURE)
         latestTmpUri = getTmpFileUri(".mp4")
         intent.putExtra(MediaStore.EXTRA_OUTPUT, latestTmpUri)

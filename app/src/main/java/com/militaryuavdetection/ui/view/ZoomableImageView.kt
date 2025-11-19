@@ -173,7 +173,7 @@ class ZoomableImageView(context: Context, attrs: AttributeSet?) : AppCompatImage
         backgroundPaint.color = color
 
         // --- THAY ĐỔI LOGIC MÀU CHỮ ---
-        textPaint.color = if (value == 0 || value == 4) Color.BLACK else Color.WHITE
+        textPaint.color = if (value == 0 || value == 3 || value == 4) Color.BLACK else Color.WHITE
         // -----------------------------
 
         // --- THAY ĐỔI LOGIC KÍCH THƯỚC CHỮ ---
